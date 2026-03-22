@@ -1,0 +1,510 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { BattlePhaseType } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth";
+import { fetchBattleTemplateForDuplicate } from "@/lib/battle-templates-queries";
+import { assertGuildTextChannelId } from "@/lib/discord-rest";
+import { parseEventDurationMinutes } from "@/lib/event-duration";
+
+const PHASES: BattlePhaseType[] = [
+  "START",
+  "OBJECTIVE",
+  "REMINDER",
+  "FINAL",
+];
+
+function parsePhase(s: string): BattlePhaseType | null {
+  return PHASES.includes(s as BattlePhaseType) ? (s as BattlePhaseType) : null;
+}
+
+export async function createTemplateAction(formData: FormData) {
+  await requireAdmin();
+  const guildId = String(formData.get("guildId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const eventDurationMinutes = parseEventDurationMinutes(
+    formData.get("eventDurationMinutes"),
+  );
+  if (!guildId || !name) return;
+  const created = await prisma.battleTemplate.create({
+    data: {
+      guildId,
+      name,
+      description: description || undefined,
+      eventDurationMinutes,
+    },
+  });
+  revalidatePath("/dashboard/templates");
+  revalidatePath("/dashboard");
+  redirect(`/dashboard/templates/${created.id}/edit`);
+}
+
+export async function updateTemplateMetaAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const eventDurationMinutes = parseEventDurationMinutes(
+    formData.get("eventDurationMinutes"),
+  );
+  if (!id || !name) return;
+  await prisma.battleTemplate.update({
+    where: { id },
+    data: { name, description, eventDurationMinutes },
+  });
+  revalidatePath("/dashboard/templates");
+  revalidatePath(`/dashboard/templates/${id}`);
+  revalidatePath(`/dashboard/templates/${id}/edit`);
+  redirect(
+    `/dashboard/templates/${id}/edit?toast=saved&toastMsg=${encodeURIComponent("Métadonnées enregistrées.")}`,
+  );
+}
+
+export async function deleteTemplateAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  try {
+    await prisma.battleTemplate.delete({ where: { id } });
+  } catch {
+    /* FK / in use */
+  }
+  revalidatePath("/dashboard/templates");
+  redirect(
+    `/dashboard/templates?toast=saved&toastMsg=${encodeURIComponent("Modèle supprimé.")}`,
+  );
+}
+
+export async function duplicateTemplateAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("templateId") ?? "");
+  if (!id) redirect("/dashboard/templates");
+  const src = await fetchBattleTemplateForDuplicate(id);
+  if (!src) redirect("/dashboard/templates");
+  let name = `${src.name} (copie)`;
+  let n = 2;
+  while (
+    await prisma.battleTemplate.findFirst({
+      where: { guildId: src.guildId, name },
+      select: { id: true },
+    })
+  ) {
+    name = `${src.name} (copie ${n})`;
+    n += 1;
+  }
+  const created = await prisma.battleTemplate.create({
+    data: {
+      guildId: src.guildId,
+      name,
+      description: src.description,
+      eventDurationMinutes: src.eventDurationMinutes,
+      isDefault: false,
+      events: {
+        create: src.events.map((e) => ({
+          offsetSeconds: e.offsetSeconds,
+          key: e.key,
+          phaseType: e.phaseType,
+          title: e.title,
+          objective: e.objective,
+          action: e.action,
+          nextHint: e.nextHint,
+          orderIndex: e.orderIndex,
+        })),
+      },
+    },
+  });
+  revalidatePath("/dashboard/templates");
+  redirect(
+    `/dashboard/templates/${created.id}/edit?toast=duplicated&toastMsg=${encodeURIComponent(`Copie créée : ${name}`)}`,
+  );
+}
+
+export async function addPhaseAction(formData: FormData) {
+  await requireAdmin();
+  const templateId = String(formData.get("templateId") ?? "");
+  let key = String(formData.get("key") ?? "").trim();
+  if (!key) {
+    key = `evt-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  }
+  const offsetSeconds = Number(formData.get("offsetSeconds"));
+  const phaseTypeRaw = String(formData.get("phaseType") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const objective = String(formData.get("objective") ?? "").trim();
+  const action = String(formData.get("action") ?? "").trim();
+  const nextHint = String(formData.get("nextHint") ?? "").trim();
+  const phaseType = parsePhase(phaseTypeRaw);
+  if (!templateId || !Number.isInteger(offsetSeconds) || offsetSeconds < 0 || !phaseType || !title) return;
+
+  const maxOrder = await prisma.battleEventDefinition.aggregate({
+    where: { templateId },
+    _max: { orderIndex: true },
+  });
+  const orderIndex = (maxOrder._max.orderIndex ?? -1) + 1;
+
+  await prisma.battleEventDefinition.create({
+    data: {
+      templateId,
+      key,
+      offsetSeconds,
+      phaseType,
+      title,
+      objective,
+      action,
+      nextHint,
+      orderIndex,
+    },
+  });
+  revalidatePath(`/dashboard/templates/${templateId}`);
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  redirect(
+    `/dashboard/templates/${templateId}/edit?toast=saved&toastMsg=${encodeURIComponent("Phase ajoutée.")}`,
+  );
+}
+
+export async function updatePhaseAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const templateId = String(formData.get("templateId") ?? "");
+  const key = String(formData.get("key") ?? "").trim();
+  const offsetSeconds = Number(formData.get("offsetSeconds"));
+  const phaseTypeRaw = String(formData.get("phaseType") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const objective = String(formData.get("objective") ?? "").trim();
+  const action = String(formData.get("action") ?? "").trim();
+  const nextHint = String(formData.get("nextHint") ?? "").trim();
+  const phaseType = parsePhase(phaseTypeRaw);
+  if (!id || !templateId || !key || !Number.isInteger(offsetSeconds) || offsetSeconds < 0 || !phaseType || !title) return;
+
+  await prisma.battleEventDefinition.update({
+    where: { id },
+    data: {
+      key,
+      offsetSeconds,
+      phaseType,
+      title,
+      objective,
+      action,
+      nextHint,
+    },
+  });
+  revalidatePath(`/dashboard/templates/${templateId}`);
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  redirect(
+    `/dashboard/templates/${templateId}/edit?toast=saved&toastMsg=${encodeURIComponent("Phase enregistrée.")}`,
+  );
+}
+
+export async function deletePhaseAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const templateId = String(formData.get("templateId") ?? "");
+  if (!id || !templateId) return;
+  await prisma.battleEventDefinition.delete({ where: { id } });
+  revalidatePath(`/dashboard/templates/${templateId}`);
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  redirect(
+    `/dashboard/templates/${templateId}/edit?toast=saved&toastMsg=${encodeURIComponent("Phase supprimée.")}`,
+  );
+}
+
+export async function movePhaseAction(formData: FormData) {
+  await requireAdmin();
+  const phaseId = String(formData.get("phaseId") ?? "");
+  const templateId = String(formData.get("templateId") ?? "");
+  const dir = String(formData.get("dir") ?? "");
+  if (!phaseId || !templateId || (dir !== "up" && dir !== "down")) return;
+
+  const all = await prisma.battleEventDefinition.findMany({
+    where: { templateId },
+    orderBy: [{ offsetSeconds: "asc" }, { orderIndex: "asc" }],
+  });
+  const i = all.findIndex((p) => p.id === phaseId);
+  if (i < 0) return;
+  const j = dir === "up" ? i - 1 : i + 1;
+  if (j < 0 || j >= all.length) return;
+  const cur = all[i]!;
+  const neigh = all[j]!;
+  if (cur.offsetSeconds !== neigh.offsetSeconds) return;
+
+  await prisma.$transaction([
+    prisma.battleEventDefinition.update({
+      where: { id: cur.id },
+      data: { orderIndex: neigh.orderIndex },
+    }),
+    prisma.battleEventDefinition.update({
+      where: { id: neigh.id },
+      data: { orderIndex: cur.orderIndex },
+    }),
+  ]);
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  redirect(
+    `/dashboard/templates/${templateId}/edit?toast=saved&toastMsg=${encodeURIComponent("Ordre des phases mis à jour.")}`,
+  );
+}
+
+/**
+ * Réordonne toutes les phases du modèle : réassigne les `offsetSeconds` dans l’ordre
+ * chronologique précédent (multiset conservé) et `orderIndex` 0..n-1.
+ */
+export async function reorderTemplatePhasesAction(formData: FormData) {
+  await requireAdmin();
+  const templateId = String(formData.get("templateId") ?? "");
+  const ids = formData.getAll("phaseId").map(String).filter(Boolean);
+  if (!templateId || ids.length === 0) {
+    return { ok: false as const, error: "Données invalides." };
+  }
+
+  const all = await prisma.battleEventDefinition.findMany({
+    where: { templateId },
+    orderBy: [{ offsetSeconds: "asc" }, { orderIndex: "asc" }],
+  });
+  if (ids.length !== all.length) {
+    return { ok: false as const, error: "Liste de phases incomplète." };
+  }
+  if (new Set(ids).size !== ids.length) {
+    return { ok: false as const, error: "Liste de phases invalide." };
+  }
+  const idSet = new Set(all.map((e) => e.id));
+  for (const id of ids) {
+    if (!idSet.has(id)) {
+      return { ok: false as const, error: "Phase inconnue." };
+    }
+  }
+
+  const sortedOffsets = [...all]
+    .sort(
+      (a, b) =>
+        a.offsetSeconds - b.offsetSeconds || a.orderIndex - b.orderIndex,
+    )
+    .map((e) => e.offsetSeconds);
+
+  await prisma.$transaction(
+    ids.map((id, i) =>
+      prisma.battleEventDefinition.update({
+        where: { id },
+        data: {
+          offsetSeconds: sortedOffsets[i]!,
+          orderIndex: i,
+        },
+      }),
+    ),
+  );
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  revalidatePath(`/dashboard/templates/${templateId}`);
+  return { ok: true as const };
+}
+
+export type GuildSettingsFormState = {
+  error?: string;
+  success?: string;
+};
+
+/**
+ * Guild settings form (useActionState). Validates battle channel against Discord when set.
+ */
+export async function updateGuildAction(
+  _prev: GuildSettingsFormState,
+  formData: FormData,
+): Promise<GuildSettingsFormState> {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const battleChannelId = String(formData.get("battleChannelId") ?? "").trim();
+  const defaultTemplateId = String(formData.get("defaultTemplateId") ?? "").trim();
+  if (!id) return { error: "Formulaire invalide." };
+
+  const guild = await prisma.guildSettings.findUnique({
+    where: { id },
+    select: { discordGuildId: true },
+  });
+  if (!guild) return { error: "Guilde introuvable." };
+
+  if (battleChannelId) {
+    const existing = await prisma.guildSettings.findUnique({
+      where: { id },
+      select: { battleChannelId: true },
+    });
+    const unchanged =
+      battleChannelId === (existing?.battleChannelId ?? "");
+    if (!unchanged) {
+      const check = await assertGuildTextChannelId(
+        guild.discordGuildId,
+        battleChannelId,
+      );
+      if (!check.ok) return { error: check.error };
+    }
+  }
+
+  if (defaultTemplateId) {
+    const tpl = await prisma.battleTemplate.findFirst({
+      where: { id: defaultTemplateId, guildId: id },
+      select: { id: true },
+    });
+    if (!tpl) {
+      return {
+        error: "Le modèle par défaut choisi n’appartient pas à cette guilde.",
+      };
+    }
+    await prisma.$transaction([
+      prisma.battleTemplate.updateMany({
+        where: { guildId: id },
+        data: { isDefault: false },
+      }),
+      prisma.battleTemplate.update({
+        where: { id: defaultTemplateId },
+        data: { isDefault: true },
+      }),
+      prisma.guildSettings.update({
+        where: { id },
+        data: {
+          battleChannelId: battleChannelId || null,
+          defaultTemplateId,
+        },
+      }),
+    ]);
+  } else {
+    await prisma.$transaction([
+      prisma.battleTemplate.updateMany({
+        where: { guildId: id },
+        data: { isDefault: false },
+      }),
+      prisma.guildSettings.update({
+        where: { id },
+        data: {
+          battleChannelId: battleChannelId || null,
+          defaultTemplateId: null,
+        },
+      }),
+    ]);
+  }
+  revalidatePath("/dashboard/server");
+  revalidatePath("/dashboard/guild");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/templates");
+  revalidatePath("/dashboard/events");
+  revalidatePath("/dashboard/launch");
+  return { success: "Paramètres enregistrés." };
+}
+
+export type ManagedRunActionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export async function createManagedRunAction(
+  formData: FormData,
+): Promise<ManagedRunActionResult> {
+  await requireAdmin();
+  const guildSettingsId = String(formData.get("guildSettingsId") ?? "");
+  const templateId = String(formData.get("templateId") ?? "");
+  const channelId = String(formData.get("channelId") ?? "").trim();
+  const channelNameSnapshot =
+    String(formData.get("channelNameSnapshot") ?? "").trim() || null;
+  const whenRaw = String(formData.get("scheduledAt") ?? "");
+  const launchNow = formData.get("launchNow") === "on";
+
+  if (!guildSettingsId || !templateId) {
+    return { ok: false, error: "Guilde ou modèle manquant." };
+  }
+  if (!channelId) {
+    return {
+      ok: false,
+      error: "Choisis un salon texte Discord pour publier la bataille.",
+    };
+  }
+
+  const guild = await prisma.guildSettings.findUnique({
+    where: { id: guildSettingsId },
+    select: { discordGuildId: true },
+  });
+  if (!guild) {
+    return { ok: false, error: "Guilde introuvable." };
+  }
+
+  const tpl = await prisma.battleTemplate.findFirst({
+    where: { id: templateId, guildId: guildSettingsId },
+    select: { id: true },
+  });
+  if (!tpl) {
+    return {
+      ok: false,
+      error: "Ce modèle n’appartient pas à la guilde sélectionnée.",
+    };
+  }
+
+  const chCheck = await assertGuildTextChannelId(
+    guild.discordGuildId,
+    channelId,
+  );
+  if (!chCheck.ok) return { ok: false, error: chCheck.error };
+
+  let scheduledAt: Date;
+  if (launchNow) {
+    scheduledAt = new Date();
+  } else {
+    if (!whenRaw) {
+      return {
+        ok: false,
+        error: "Indique une date et heure de départ, ou coche « Lancer tout de suite ».",
+      };
+    }
+    scheduledAt = new Date(whenRaw);
+    if (Number.isNaN(scheduledAt.getTime())) {
+      return { ok: false, error: "Date ou heure invalide." };
+    }
+  }
+
+  const run = await prisma.managedEventRun.create({
+    data: {
+      guildSettingsId,
+      templateId,
+      channelId,
+      channelNameSnapshot,
+      scheduledAt,
+      status: "SCHEDULED",
+    },
+  });
+  try {
+    await prisma.managedEventRunLog.create({
+      data: {
+        runId: run.id,
+        level: "info",
+        message: `Run créé depuis l’admin · ${launchNow ? "immédiat" : `planifié ${scheduledAt.toISOString()}`} · salon ${channelId}`,
+      },
+    });
+  } catch {
+    /* ignore if logs table missing in old DB */
+  }
+  revalidatePath("/dashboard/runs");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/events");
+  revalidatePath("/dashboard/launch");
+  return { ok: true };
+}
+
+export async function cancelRunAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  const updated = await prisma.managedEventRun.updateMany({
+    where: { id, status: "SCHEDULED" },
+    data: { status: "CANCELLED" },
+  });
+  if (updated.count > 0) {
+    try {
+      await prisma.managedEventRunLog.create({
+        data: {
+          runId: id,
+          level: "info",
+          message: "Run annulé depuis l’admin web.",
+        },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  revalidatePath("/dashboard/runs");
+  revalidatePath("/dashboard");
+  revalidatePath(`/dashboard/runs/${id}`);
+}

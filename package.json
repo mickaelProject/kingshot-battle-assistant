@@ -1,0 +1,26 @@
+{
+  "name": "kingshot-battle-assistant",
+  "private": true,
+  "packageManager": "npm@10.9.0",
+  "workspaces": [
+    "apps/bot",
+    "apps/web",
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "npm run build -w @kingshot/shared",
+    "build": "npm run build -w @kingshot/shared && npm run build -w @kingshot/bot && npm run build -w @kingshot/web",
+    "web:dev": "npm run dev -w @kingshot/web",
+    "web:build": "npm run build -w @kingshot/web",
+    "db:generate": "npm run db:generate -w @kingshot/bot",
+    "db:migrate": "npm run db:migrate -w @kingshot/bot",
+    "db:migrate:deploy": "npm run db:migrate:deploy -w @kingshot/bot",
+    "db:seed": "npm run db:seed -w @kingshot/bot",
+    "bot:dev": "npm run dev -w @kingshot/bot",
+    "test": "npm run test -w @kingshot/bot",
+    "lint": "npm run lint -w @kingshot/bot --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

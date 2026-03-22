@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// One row per Discord guild (internal id + Discord snowflake).
+model GuildSettings {
+  id                String   @id @default(cuid())
+  discordGuildId    String   @unique
+  battleChannelId   String?
+  defaultTemplateId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  defaultTemplate BattleTemplate? @relation("GuildDefaultTemplate", fields: [defaultTemplateId], references: [id], onDelete: SetNull)
+  templates       BattleTemplate[] @relation("GuildTemplates")
+  sessions          BattleSession[]
+  assignments       PlayerAssignment[]
+  managedEventRuns  ManagedEventRun[]
+
+  @@index([discordGuildId])
+}
+
+/// Named battle timeline (phases for event manager + Discord).
+model BattleTemplate {
+  id          String   @id @default(cuid())
+  guildId     String
+  name        String
+  description String?
+  /// Durée réelle de l’événement en jeu (brief → fin), distincte de la timeline d’annonces Discord.
+  eventDurationMinutes Int @default(60)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guild            GuildSettings           @relation("GuildTemplates", fields: [guildId], references: [id], onDelete: Cascade)
+  events           BattleEventDefinition[]
+  sessions         BattleSession[]
+  defaultForGuilds GuildSettings[]         @relation("GuildDefaultTemplate")
+  managedEventRuns ManagedEventRun[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+/// Single phase: T+offset, typed for UI + announcements.
+model BattleEventDefinition {
+  id            String          @id @default(cuid())
+  templateId    String
+  offsetSeconds Int
+  key           String
+  phaseType     BattlePhaseType @default(REMINDER)
+  title         String          @default("")
+  objective     String          @default("")
+  action        String          @default("")
+  nextHint      String          @default("")
+  orderIndex    Int             @default(0)
+
+  template BattleTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+enum BattlePhaseType {
+  START
+  OBJECTIVE
+  REMINDER
+  FINAL
+}
+
+/// At most one ACTIVE row per guild — enforced by partial unique index (see migrations).
+model BattleSession {
+  id            String              @id @default(cuid())
+  guildId       String
+  templateId    String
+  channelId     String
+  starterUserId String
+  startedAt     DateTime            @default(now())
+  endedAt       DateTime?
+  status        BattleSessionStatus @default(ACTIVE)
+  /// When true, scheduled reminders are not posted until resume.
+  isPaused      Boolean             @default(false)
+
+  guild       GuildSettings    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  template    BattleTemplate   @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  reminders         BattleReminder[]
+  assignments       PlayerAssignment[]
+  managedEventRun   ManagedEventRun?
+
+  @@index([guildId, status])
+  @@index([channelId])
+}
+
+enum BattleSessionStatus {
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+/// Web-scheduled or immediate launch; bot executes at scheduledAt (Discord = execution layer).
+model ManagedEventRun {
+  id              String             @id @default(cuid())
+  guildSettingsId String
+  templateId      String
+  /// Discord text channel snowflake for battle embeds.
+  channelId       String
+  /// Channel name at schedule time (admin UX + debugging).
+  channelNameSnapshot String?
+  /// When the bot should start the battle (UTC).
+  scheduledAt     DateTime
+  status          ManagedEventStatus @default(SCHEDULED)
+  battleSessionId String?            @unique
+  errorMessage    String?
+  completedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  guild    GuildSettings  @relation(fields: [guildSettingsId], references: [id], onDelete: Cascade)
+  template BattleTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  session  BattleSession? @relation(fields: [battleSessionId], references: [id], onDelete: SetNull)
+  logs     ManagedEventRunLog[]
+
+  @@index([guildSettingsId, status])
+  @@index([status, scheduledAt])
+}
+
+/// Append-only audit trail for managed runs (web + operator debugging).
+model ManagedEventRunLog {
+  id        String   @id @default(cuid())
+  runId     String
+  level     String
+  message   String
+  createdAt DateTime @default(now())
+
+  run ManagedEventRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+}
+
+enum ManagedEventStatus {
+  SCHEDULED
+  STARTING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+/// Snapshot of phase copy at schedule time (template edits do not change in-flight battle).
+model BattleReminder {
+  id                String          @id @default(cuid())
+  sessionId         String
+  scheduledAt       DateTime
+  eventDefinitionId String?
+  phaseType         BattlePhaseType @default(REMINDER)
+  title             String          @default("")
+  objective         String          @default("")
+  action            String          @default("")
+  nextHint          String          @default("")
+  status            ReminderStatus  @default(PENDING)
+  sentAt            DateTime?
+
+  session BattleSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status])
+  @@index([scheduledAt, status])
+}
+
+enum ReminderStatus {
+  PENDING
+  PROCESSING
+  SENT
+  SKIPPED
+}
+
+model PlayerAssignment {
+  id        String   @id @default(cuid())
+  guildId   String
+  sessionId String?
+  slotLabel String
+  userId    String
+  createdAt DateTime @default(now())
+
+  guild   GuildSettings  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  session BattleSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, sessionId])
+}
