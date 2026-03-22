@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 export function RunPlayerLiveLink({ runId }: { runId: string }) {
   const [hint, setHint] = useState<string | null>(null);
-  const relPath = `/app/live?run=${encodeURIComponent(runId)}`;
+  const relPath = `/live/${encodeURIComponent(runId)}`;
 
   const copy = useCallback(async () => {
     const url = `${window.location.origin}${relPath}`;
@@ -20,8 +20,8 @@ export function RunPlayerLiveLink({ runId }: { runId: string }) {
   return (
     <div className="run-player-live-link">
       <p className="field-hint">
-        Écran minimal pour les joueurs : objectif, bâtiment, leader, prochaine
-        action, compte à rebours. Pas d’édition.
+        Écran live immersif pour les joueurs : phase actuelle, progression, salon
+        minimal. Pas d’édition.
       </p>
       <code className="run-player-live-link__url">{relPath}</code>
       <div className="run-player-live-link__row">
@@ -32,9 +32,7 @@ export function RunPlayerLiveLink({ runId }: { runId: string }) {
       </div>
       <p className="field-hint">
         Personnalisation (assignations en base) : ajoutez{" "}
-        <code className="roster-code-hint">
-          &amp;me=ID_DISCORD
-        </code>{" "}
+        <code className="roster-code-hint">?me=ID_DISCORD</code> à l’URL
         (snowflake du joueur).
       </p>
     </div>

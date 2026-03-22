@@ -19,6 +19,20 @@ export type EditorPhase = {
   generatedDiscordDraft: string | null;
 };
 
+/** Champs édités côté client pour fusionner dans l’aperçu Discord sans doublon d’embed. */
+export type PhaseLiveDraft = Partial<
+  Pick<
+    EditorPhase,
+    | "title"
+    | "objective"
+    | "action"
+    | "nextHint"
+    | "phaseType"
+    | "offsetSeconds"
+    | "customDiscordText"
+  >
+>;
+
 export function jsonToStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.filter((x): x is string => typeof x === "string");

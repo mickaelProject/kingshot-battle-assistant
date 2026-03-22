@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useTranslations } from "next-intl";
 import { SectionCard } from "@/components/ui/section-card";
 import { updateGuildAction, type GuildSettingsFormState } from "@/actions/data";
 
@@ -26,6 +27,7 @@ export function ServerSettingsCard({
   discordConfigured: boolean;
   serverLabel: string;
 }) {
+  const t = useTranslations("serverCard");
   const [state, formAction, pending] = useActionState(
     updateGuildAction,
     initial,
@@ -34,23 +36,16 @@ export function ServerSettingsCard({
   const orphanBattle =
     battleChannelId &&
     !channels.some((c) => c.id === battleChannelId) ? (
-      <option value={battleChannelId}>
-        Ancien canal (hors liste)
-      </option>
+      <option value={battleChannelId}>{t("orphanChannel")}</option>
     ) : null;
 
   return (
     <SectionCard title={serverLabel}>
       {!discordConfigured ? (
-        <p className="form-error">
-          La connexion au bot n’est pas configurée : impossible de lister les salons
-          depuis l’administration.
-        </p>
+        <p className="form-error">{t("botNotConfigured")}</p>
       ) : null}
       {channels.length === 0 && discordConfigured ? (
-        <p className="form-error">
-          Aucun salon texte détecté — vérifiez que le bot est sur le serveur.
-        </p>
+        <p className="form-error">{t("noTextChannels")}</p>
       ) : null}
 
       <form action={formAction} className="form-stack">
@@ -60,7 +55,7 @@ export function ServerSettingsCard({
 
         <div className="form-field">
           <label htmlFor={`battle-ch-${guildId}`}>
-            Canal des annonces tactiques
+            {t("tacticalChannelLabel")}
           </label>
           {!discordConfigured ? (
             <input
@@ -74,7 +69,7 @@ export function ServerSettingsCard({
               name="battleChannelId"
               defaultValue={battleChannelId ?? ""}
             >
-              <option value="">— Choisir un salon —</option>
+              <option value="">{t("chooseChannel")}</option>
               {orphanBattle}
               {channels.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -83,33 +78,30 @@ export function ServerSettingsCard({
               ))}
             </select>
           )}
-          <p className="field-hint">
-            C’est là que le bot publie les messages de bataille. Choisis un
-            salon texte dédié (ex. #tactique).
-          </p>
+          <p className="field-hint">{t("tacticalChannelHint")}</p>
         </div>
 
         <div className="form-field">
-          <label htmlFor={`def-tpl-${guildId}`}>Modèle utilisé par défaut</label>
+          <label htmlFor={`def-tpl-${guildId}`}>
+            {t("defaultTemplateLabel")}
+          </label>
           <select
             id={`def-tpl-${guildId}`}
             name="defaultTemplateId"
             defaultValue={defaultTemplateId ?? ""}
           >
-            <option value="">— Aucun —</option>
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
+            <option value="">{t("noTemplate")}</option>
+            {templates.map((tmpl) => (
+              <option key={tmpl.id} value={tmpl.id}>
+                {tmpl.name}
               </option>
             ))}
           </select>
-          <p className="field-hint">
-            Utilisé quand une bataille démarre sans préciser de modèle.
-          </p>
+          <p className="field-hint">{t("defaultTemplateHint")}</p>
         </div>
 
         <button type="submit" className="btn btn-primary" disabled={pending}>
-          {pending ? "Enregistrement…" : "Enregistrer"}
+          {pending ? t("saving") : t("save")}
         </button>
       </form>
     </SectionCard>

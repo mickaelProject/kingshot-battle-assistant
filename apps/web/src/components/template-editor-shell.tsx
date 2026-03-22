@@ -1,36 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TimelineScope } from "@/lib/timeline-scope";
 import {
-  addPhaseAction,
-  clearPhaseDiscordOverrideAction,
-  restorePhaseDiscordDraftAction,
-  updatePhaseAction,
+  duplicateTemplateAction,
   updateTemplateMetaAction,
 } from "@/actions/data";
-import { TacticalPhasePreview } from "@/components/tactical-phase-preview";
-import { TemplatePhaseTimeline } from "@/components/template-phase-timeline";
-import { TemplateDeleteBlock } from "@/components/template-delete-block";
-import { EmptyState } from "@/components/ui/empty-state";
-import { PageHeader } from "@/components/ui/page-header";
-import { PreviewPanel } from "@/components/ui/preview-panel";
-import { SectionCard } from "@/components/ui/section-card";
-import type { EditorPhase } from "@/lib/editor-phase";
-import { formatDurationHuman, formatOffsetLabel } from "@/lib/time-human";
+import { AddPhaseModal } from "@/components/template-editor/add-phase-modal";
+import { TemplateMissionFlow } from "@/components/template-mission-flow";
+import { TemplateDangerZone } from "@/components/template-editor/template-danger-zone";
+import { TemplateDescriptionField } from "@/components/template-editor/template-description-field";
+import { DiscordPreview } from "@/components/template/DiscordPreview";
+import { PhaseEditor } from "@/components/template/PhaseEditor";
+import type { EditorPhase, PhaseLiveDraft } from "@/lib/editor-phase";
+import { formatDurationHuman } from "@/lib/time-human";
+import { cn } from "@/lib/utils";
+
+type EditorMainTab = "flow" | "preview" | "settings";
 
 export type { EditorPhase };
-
-type PreviewDraft = Pick<
-  EditorPhase,
-  | "phaseType"
-  | "title"
-  | "objective"
-  | "action"
-  | "nextHint"
-  | "customDiscordText"
->;
 
 const SCOPE_TAB_ORDER: TimelineScope[] = ["GLOBAL", "LEGION_1", "LEGION_2"];
 
@@ -48,27 +37,13 @@ function sortEditorPhases(a: EditorPhase, b: EditorPhase): number {
   );
 }
 
-const PHASE_TYPES: { id: string; label: string; hint: string }[] = [
-  { id: "START", label: "Lancement", hint: "Ouverture de session" },
-  { id: "OBJECTIVE", label: "Objectif", hint: "But à atteindre" },
-  { id: "REMINDER", label: "Rappel", hint: "Relance horaire" },
-  { id: "FINAL", label: "Clôture", hint: "Fin / synthèse" },
-];
-
-function minutesFromSeconds(sec: number): number {
-  return Math.round((sec / 60) * 100) / 100;
-}
-
-function secondsFromMinutes(min: number): number {
-  if (!Number.isFinite(min) || min < 0) return 0;
-  return Math.round(min * 60);
-}
-
 export function TemplateEditorShell({
   templateId,
   name: initialName,
   description: initialDescription,
   eventDurationMinutes: initialEventDurationMinutes,
+  legion1StartOffsetMinutes: initialLegion1StartOffsetMinutes = 0,
+  legion2StartOffsetMinutes: initialLegion2StartOffsetMinutes = 0,
   eventProductKey,
   phases,
   draftSource,
@@ -77,6 +52,9 @@ export function TemplateEditorShell({
   name: string;
   description: string | null;
   eventDurationMinutes: number;
+  /** Minutes après le début alliance (annonces Discord) avant le T+0 timeline Légion 1. */
+  legion1StartOffsetMinutes?: number;
+  legion2StartOffsetMinutes?: number;
   eventProductKey: string | null;
   phases: EditorPhase[];
   /** Brouillon auto depuis roster. */
@@ -106,34 +84,63 @@ export function TemplateEditorShell({
 
   const reorderScope: TimelineScope = showTabs ? activeScope : "GLOBAL";
 
-  const [selectedId, setSelectedId] = useState<string | null>(
-    visiblePhases[0]?.id ?? null,
-  );
-  const [editDraft, setEditDraft] = useState<PreviewDraft | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoverPhaseId, setHoverPhaseId] = useState<string | null>(null);
+  const [mainTab, setMainTab] = useState<EditorMainTab>("flow");
+  const [addPhaseModalOpen, setAddPhaseModalOpen] = useState(false);
+
+  const selectPhaseOpenPreview = (id: string) => {
+    setSelectedId(id);
+    setMainTab("preview");
+  };
 
   useEffect(() => {
-    setEditDraft(null);
-  }, [selectedId]);
-
-  useEffect(() => {
-    if (selectedId && visiblePhases.some((p) => p.id === selectedId)) return;
-    setSelectedId(visiblePhases[0]?.id ?? null);
+    if (selectedId == null) return;
+    if (!visiblePhases.some((p) => p.id === selectedId)) {
+      setSelectedId(null);
+    }
   }, [visiblePhases, selectedId]);
 
   const selected = visiblePhases.find((p) => p.id === selectedId) ?? null;
-  const previewPhase: EditorPhase | null = selected
-    ? { ...selected, ...(editDraft ?? {}) }
-    : null;
+
+  const [liveDiscordDraft, setLiveDiscordDraft] =
+    useState<PhaseLiveDraft | null>(null);
+
+  const handleLiveDiscordDraft = useCallback((d: PhaseLiveDraft) => {
+    setLiveDiscordDraft(d);
+  }, []);
+
+  useEffect(() => {
+    setLiveDiscordDraft(null);
+  }, [selectedId]);
+
+  const phasesForDiscordPreview = useMemo(() => {
+    if (!selectedId || !liveDiscordDraft) return visiblePhases;
+    return visiblePhases.map((p) =>
+      p.id === selectedId ? { ...p, ...liveDiscordDraft } : p,
+    );
+  }, [visiblePhases, selectedId, liveDiscordDraft]);
 
   const timelineSpanSec = useMemo(() => {
     if (phases.length === 0) return 0;
     return Math.max(...phases.map((p) => p.offsetSeconds));
   }, [phases]);
 
+  const legionAllianceOffsetMinutes =
+    activeScope === "LEGION_1"
+      ? initialLegion1StartOffsetMinutes
+      : activeScope === "LEGION_2"
+        ? initialLegion2StartOffsetMinutes
+        : 0;
+
   const scopeHint =
     activeScope === "GLOBAL"
       ? "Timeline alliance : ce sont ces phases que le bot publie sur Discord (T+)."
-      : "Plan tactique de légion : consigne interne — non postée automatiquement par le bot.";
+      : "Plan tactique de légion : consigne interne — non postée automatiquement par le bot. Les T+ affichés sont relatifs à la légion ; l’horloge « alliance » tient compte du décalage défini dans Réglages.";
+
+  const showLegionOffsetFields = tabScopes.some(
+    (s) => s === "LEGION_1" || s === "LEGION_2",
+  );
 
   return (
     <div className="dashboard-main template-editor">
@@ -146,44 +153,165 @@ export function TemplateEditorShell({
           </p>
         </div>
       ) : null}
-      <PageHeader
-        title={initialName}
-        description="À gauche : infos du scénario et durée sur le terrain. Au centre : le fil des annonces Discord. À droite : aperçu comme dans le salon."
-        actions={
-          <Link
-            href={`/dashboard/templates/${templateId}`}
-            className="btn btn-ghost"
-          >
-            Aperçu lecture seule
-          </Link>
-        }
-      />
+      <header className="mb-8 border-b border-[#1e2230] pb-8">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <div className="font-rajdhani text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-500/80">
+              Éditeur de modèle
+            </div>
+            <h1 className="mt-1 font-rajdhani text-3xl font-bold tracking-tight text-slate-100 md:text-[2rem]">
+              {initialName}
+            </h1>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-500">
+              Onglets : déroulé, Discord / édition, réglages — une vue à la fois,
+              pleine largeur.
+            </p>
+          </div>
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+            <Link
+              href={`/dashboard/templates/${templateId}`}
+              className="rounded-lg border border-[#2a3042] bg-[#0a0c10] px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:border-[#3f4654] hover:text-slate-200"
+            >
+              Aperçu lecture seule
+            </Link>
+            <form action={duplicateTemplateAction}>
+              <input type="hidden" name="templateId" value={templateId} />
+              <button
+                type="submit"
+                className="rounded-lg border border-[#2a3042] bg-[#13151c] px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:border-[#3f4654] hover:text-white"
+              >
+                Dupliquer
+              </button>
+            </form>
+            <Link
+              href={`/dashboard/events?templateId=${encodeURIComponent(templateId)}`}
+              className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-black shadow-[0_0_20px_rgba(245,158,11,0.25)] transition-colors hover:bg-amber-400"
+            >
+              Lancer ce modèle
+            </Link>
+          </div>
+        </div>
+      </header>
 
-      <div className="template-editor__grid">
-        <aside className="template-editor__col template-editor__col--left">
-          <SectionCard title="Informations">
-            <form action={updateTemplateMetaAction} className="form-stack">
+      <nav
+        className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        aria-label="Sections de l’éditeur"
+      >
+        <div
+          className="flex w-full flex-wrap gap-1 rounded-2xl border border-[#1e2230] bg-[#121826] p-1.5 shadow-lg shadow-black/25 ring-1 ring-white/[0.04] sm:max-w-3xl"
+          role="tablist"
+        >
+          {[
+            {
+              id: "flow" as const,
+              label: "Mission flow",
+              sub: "Déroulé & ordre",
+            },
+            {
+              id: "preview" as const,
+              label: "Discord & édition",
+              sub: selected ? "Phase sélectionnée" : "Aperçu + panneau",
+            },
+            {
+              id: "settings" as const,
+              label: "Réglages",
+              sub: "Modèle & zone danger",
+            },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`editor-tab-${t.id}`}
+              aria-selected={mainTab === t.id}
+              aria-controls={`editor-panel-${t.id}`}
+              className={cn(
+                "min-h-[52px] min-w-0 flex-1 rounded-xl px-3 py-2 text-left transition-all sm:min-w-[140px]",
+                mainTab === t.id
+                  ? "bg-[#0B0F17] text-slate-100 shadow-md ring-1 ring-amber-500/35"
+                  : "text-slate-500 hover:bg-[#0B0F17]/60 hover:text-slate-300",
+              )}
+              onClick={() => setMainTab(t.id)}
+            >
+              <span className="block font-rajdhani text-sm font-bold tracking-tight">
+                {t.label}
+              </span>
+              <span className="mt-0.5 block text-[10px] leading-tight text-slate-600">
+                {t.sub}
+              </span>
+            </button>
+          ))}
+        </div>
+        {mainTab === "flow" ? (
+          <p className="text-xs text-slate-600 sm:max-w-xs sm:text-right">
+            Clic sur une carte → onglet{" "}
+            <span className="text-slate-400">Discord & édition</span>
+          </p>
+        ) : null}
+      </nav>
+
+      <div className="relative min-h-[min(70vh,900px)] pb-24">
+        {/* Panneaux montés en permanence (display) pour ne pas perdre les brouillons d’édition */}
+        <div
+          id="editor-panel-settings"
+          role="tabpanel"
+          aria-labelledby="editor-tab-settings"
+          hidden={mainTab !== "settings"}
+        >
+          <div className="mx-auto flex max-w-2xl flex-col gap-4">
+            <div className="font-rajdhani text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Mission settings
+            </div>
+            <form
+              action={updateTemplateMetaAction}
+              id="template-meta-form"
+              className="space-y-4"
+            >
               <input type="hidden" name="id" value={templateId} />
-              <div className="form-field">
-                <label htmlFor="meta-name">Nom du modèle</label>
-                <input
-                  id="meta-name"
-                  name="name"
-                  defaultValue={initialName}
-                  required
-                />
+              <div className="rounded-2xl border border-[#1e2230] bg-[#121826] p-4 shadow-lg shadow-black/30 ring-1 ring-white/[0.04]">
+                <p className="mb-3 font-rajdhani text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Identité
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label
+                      htmlFor="meta-name"
+                      className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                    >
+                      Nom du modèle
+                    </label>
+                    <input
+                      id="meta-name"
+                      name="name"
+                      type="text"
+                      defaultValue={initialName}
+                      required
+                      className="w-full rounded-lg border border-[#1e2230] bg-[#0a0c10] px-3 py-2.5 text-sm text-slate-200 outline-none transition-shadow focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/15"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="meta-desc"
+                      className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                    >
+                      Description (interne)
+                    </label>
+                    <TemplateDescriptionField
+                      id="meta-desc"
+                      name="description"
+                      defaultValue={initialDescription ?? ""}
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="form-field">
-                <label htmlFor="meta-desc">Description (interne)</label>
-                <textarea
-                  id="meta-desc"
-                  name="description"
-                  defaultValue={initialDescription ?? ""}
-                  rows={3}
-                />
-              </div>
-              <div className="form-field">
-                <label htmlFor="meta-event-duration">
+              <div className="rounded-2xl border border-[#1e2230] bg-[#121826] p-4 shadow-lg shadow-black/30 ring-1 ring-white/[0.04]">
+                <p className="mb-3 font-rajdhani text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Durée événement
+                </p>
+                <label
+                  htmlFor="meta-event-duration"
+                  className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                >
                   Durée de l’événement (minutes, in-game)
                 </label>
                 <input
@@ -193,41 +321,120 @@ export function TemplateEditorShell({
                   min={1}
                   max={1440}
                   defaultValue={initialEventDurationMinutes}
+                  className="w-full rounded-lg border border-[#1e2230] bg-[#0a0c10] px-3 py-2.5 text-sm text-slate-200 outline-none transition-shadow focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/15"
                 />
-                <p className="field-hint">
-                  Brief → fin sur le terrain. Les annonces Discord peuvent s’étaler sur{" "}
-                  <strong>~{formatDurationHuman(timelineSpanSec)}</strong> (dernier
-                  T+ de la timeline).
+                <p className="mt-2 text-xs text-slate-600">
+                  Contexte pour la mission : dernière annonce à environ{" "}
+                  <strong className="text-slate-400">
+                    {formatDurationHuman(timelineSpanSec)}
+                  </strong>
+                  . Les T+ des phases ne sont pas recalculés automatiquement —
+                  ajustez-les si vous changez la durée.
                 </p>
               </div>
-              <button type="submit" className="btn btn-secondary">
-                Enregistrer les infos
-              </button>
+              {showLegionOffsetFields ? (
+                <div className="rounded-2xl border border-[#1e2230] bg-[#121826] p-4 shadow-lg shadow-black/30 ring-1 ring-white/[0.04]">
+                  <p className="mb-3 font-rajdhani text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Décalage des timelines légions
+                  </p>
+                  <p className="mb-3 text-xs leading-relaxed text-slate-600">
+                    Valeurs de référence pour l’éditeur et{" "}
+                    <strong className="text-slate-400">
+                      préréglage au lancement
+                    </strong>{" "}
+                    (Événements → Lancer une bataille), où vous pouvez ajuster
+                    le décalage pour chaque bataille. Minutes après le T+0
+                    alliance ; les phases légion restent en T+ relatif légion.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="meta-legion1-offset"
+                        className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                      >
+                        Légion 1 — début (min après alliance)
+                      </label>
+                      <input
+                        id="meta-legion1-offset"
+                        name="legion1StartOffsetMinutes"
+                        type="number"
+                        min={0}
+                        max={1440}
+                        defaultValue={initialLegion1StartOffsetMinutes}
+                        className="w-full rounded-lg border border-[#1e2230] bg-[#0a0c10] px-3 py-2.5 text-sm text-slate-200 outline-none transition-shadow focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/15"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="meta-legion2-offset"
+                        className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600"
+                      >
+                        Légion 2 — début (min après alliance)
+                      </label>
+                      <input
+                        id="meta-legion2-offset"
+                        name="legion2StartOffsetMinutes"
+                        type="number"
+                        min={0}
+                        max={1440}
+                        defaultValue={initialLegion2StartOffsetMinutes}
+                        className="w-full rounded-lg border border-[#1e2230] bg-[#0a0c10] px-3 py-2.5 text-sm text-slate-200 outline-none transition-shadow focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/15"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </form>
-          </SectionCard>
-
-          <SectionCard title="Suppression">
-            <p className="field-hint">
-              Supprime définitivement ce modèle et toutes ses phases. Bloqué si une
-              bataille ou un lancement programmé y est encore lié.
-            </p>
-            <TemplateDeleteBlock
+            <TemplateDangerZone
               templateId={templateId}
               templateName={initialName}
             />
-          </SectionCard>
-        </aside>
+            <button
+              type="submit"
+              form="template-meta-form"
+              className="w-full rounded-2xl bg-amber-500 py-3.5 text-sm font-bold text-black shadow-[0_0_28px_rgba(245,158,11,0.25)] transition-colors hover:bg-amber-400"
+            >
+              Enregistrer les infos
+            </button>
+          </div>
+        </div>
 
-        <div className="template-editor__col template-editor__col--center">
-          <SectionCard
-            className="section-card--timeline"
-            title="Fil des annonces"
-            subtitle="Grande vue verticale : survol pour l’aperçu Discord, clic pour modifier, poignée pour réordonner."
+        <div
+          id="editor-panel-flow"
+          role="tabpanel"
+          aria-labelledby="editor-tab-flow"
+          hidden={mainTab !== "flow"}
+        >
+          <div
+            id="mission-flow-column"
+            className="template-editor__col template-editor__col--center relative mx-auto max-w-4xl min-w-0"
           >
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <div className="font-rajdhani text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-500/80">
+                  Mission flow
+                </div>
+                <h2 className="mt-1 font-rajdhani text-xl font-bold text-slate-100">
+                  Déroulé de bataille
+                </h2>
+                <p className="mt-1 text-xs text-slate-600">
+                  {visiblePhases.length} phases · {initialEventDurationMinutes}{" "}
+                  min — glisser les poignées pour réordonner.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddPhaseModalOpen(true)}
+                className="shrink-0 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs font-bold text-amber-500 shadow-sm transition-all hover:border-amber-500/60 hover:bg-amber-500/15"
+              >
+                + Ajouter une phase
+              </button>
+            </div>
+
             {showTabs ? (
               <>
                 <div
-                  className="template-editor__scope-tabs"
+                  className="template-editor__scope-tabs mb-4"
                   role="tablist"
                   aria-label="Portée de la timeline"
                 >
@@ -244,445 +451,113 @@ export function TemplateEditorShell({
                     </button>
                   ))}
                 </div>
-                <p className="template-editor__scope-hint muted">{scopeHint}</p>
+                <p className="template-editor__scope-hint muted mb-4">
+                  {scopeHint}
+                </p>
               </>
             ) : null}
 
-            <TemplatePhaseTimeline
-              phases={visiblePhases}
-              templateId={templateId}
-              timelineScope={reorderScope}
-              selectedId={selectedId}
-              onSelectPhase={setSelectedId}
-            />
-
-            {selected ? (
-              <PhaseEditForm
-                key={selected.id}
-                phase={selected}
+            <div className="rounded-2xl border border-[#1e2230] bg-[#121826] p-4 shadow-xl shadow-black/40 ring-1 ring-white/[0.05] md:p-5">
+              <TemplateMissionFlow
+                phases={visiblePhases}
                 templateId={templateId}
-                eventProductKey={eventProductKey}
-                onLivePreview={setEditDraft}
+                timelineScope={reorderScope}
+                selectedId={selectedId}
+                onSelectPhase={selectPhaseOpenPreview}
+                onHoverPhase={setHoverPhaseId}
+                eventDurationMinutes={initialEventDurationMinutes}
+                legionAllianceOffsetMinutes={legionAllianceOffsetMinutes}
               />
-            ) : (
-              <EmptyState title="Sélectionne une étape dans la timeline" />
-            )}
+            </div>
 
-            <GuidedAddPhase
+            <AddPhaseModal
+              open={addPhaseModalOpen}
+              onClose={() => setAddPhaseModalOpen(false)}
               templateId={templateId}
               timelineScope={reorderScope}
             />
-          </SectionCard>
-        </div>
-
-        <aside className="template-editor__col template-editor__col--right">
-          <PreviewPanel title="Aperçu Discord">
-            {previewPhase ? (
-              <TacticalPhasePreview
-                phaseType={previewPhase.phaseType}
-                title={previewPhase.title}
-                objective={previewPhase.objective}
-                action={previewPhase.action}
-                nextHint={previewPhase.nextHint}
-                customDiscordText={previewPhase.customDiscordText}
-              />
-            ) : (
-              <p className="muted">Choisis une étape à gauche.</p>
-            )}
-          </PreviewPanel>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function PhaseEditForm({
-  phase,
-  templateId,
-  eventProductKey,
-  onLivePreview,
-}: {
-  phase: EditorPhase;
-  templateId: string;
-  eventProductKey: string | null;
-  onLivePreview: (d: PreviewDraft | null) => void;
-}) {
-  const showTacticalBlock =
-    eventProductKey === "swordland" || phase.timelineScope !== "GLOBAL";
-
-  const [minutes, setMinutes] = useState(minutesFromSeconds(phase.offsetSeconds));
-  const [phaseType, setPhaseType] = useState(phase.phaseType);
-  const [title, setTitle] = useState(phase.title);
-  const [objective, setObjective] = useState(phase.objective);
-  const [action, setAction] = useState(phase.action);
-  const [nextHint, setNextHint] = useState(phase.nextHint);
-  const [buildingsText, setBuildingsText] = useState(
-    phase.targetedBuildings.join("\n"),
-  );
-  const [leadersText, setLeadersText] = useState(
-    phase.assignedLeaders.join("\n"),
-  );
-  const [playersText, setPlayersText] = useState(
-    phase.assignedPlayers.join("\n"),
-  );
-  const [customDiscord, setCustomDiscord] = useState(
-    phase.customDiscordText ?? "",
-  );
-  const [advOpen, setAdvOpen] = useState(false);
-  const [keyDraft, setKeyDraft] = useState(phase.key);
-
-  useEffect(() => {
-    setMinutes(minutesFromSeconds(phase.offsetSeconds));
-    setPhaseType(phase.phaseType);
-    setTitle(phase.title);
-    setObjective(phase.objective);
-    setAction(phase.action);
-    setNextHint(phase.nextHint);
-    setBuildingsText(phase.targetedBuildings.join("\n"));
-    setLeadersText(phase.assignedLeaders.join("\n"));
-    setPlayersText(phase.assignedPlayers.join("\n"));
-    setCustomDiscord(phase.customDiscordText ?? "");
-    setKeyDraft(phase.key);
-    setAdvOpen(false);
-  }, [phase]);
-
-  useEffect(() => {
-    onLivePreview({
-      phaseType,
-      title,
-      objective,
-      action,
-      nextHint,
-      customDiscordText: customDiscord.trim() ? customDiscord : null,
-    });
-  }, [
-    phaseType,
-    title,
-    objective,
-    action,
-    nextHint,
-    customDiscord,
-    onLivePreview,
-  ]);
-
-  return (
-    <div className="phase-edit-box">
-      <h3 className="phase-edit-box__title">Modifier l’étape</h3>
-      <form action={updatePhaseAction} className="form-stack">
-        <input type="hidden" name="id" value={phase.id} />
-        <input type="hidden" name="templateId" value={templateId} />
-        <input type="hidden" name="timelineScope" value={phase.timelineScope} />
-        <input type="hidden" name="key" value={keyDraft} />
-        <input
-          type="hidden"
-          name="offsetSeconds"
-          value={String(secondsFromMinutes(minutes))}
-        />
-        <input type="hidden" name="phaseType" value={phaseType} />
-
-        <div className="form-field">
-          <label>Temps après le début (minutes)</label>
-          <input
-            type="number"
-            min={0}
-            step={0.25}
-            value={minutes}
-            onChange={(e) => setMinutes(parseFloat(e.target.value) || 0)}
-          />
-          <p className="field-hint">
-            Affichage Discord : {formatOffsetLabel(secondsFromMinutes(minutes))}
-          </p>
-        </div>
-
-        <div className="form-field">
-          <label>Type d’étape</label>
-          <div className="segmented-phase">
-            {PHASE_TYPES.map((pt) => (
-              <button
-                key={pt.id}
-                type="button"
-                className={`segmented-phase__btn ${phaseType === pt.id ? "segmented-phase__btn--on" : ""}`}
-                onClick={() => setPhaseType(pt.id)}
-              >
-                <span className="segmented-phase__label">{pt.label}</span>
-                <span className="segmented-phase__hint">{pt.hint}</span>
-              </button>
-            ))}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setAddPhaseModalOpen(true)}
+            className="fixed bottom-8 left-1/2 z-40 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500 text-xl font-bold text-black shadow-[0_8px_32px_rgba(245,158,11,0.35)] transition-transform hover:scale-105 hover:bg-amber-400"
+            title="Ajouter une phase"
+            aria-label="Ajouter une phase"
+          >
+            +
+          </button>
         </div>
 
-        <div className="form-field">
-          <label htmlFor={`ed-title-${phase.id}`}>Titre (grand texte Discord)</label>
-          <input
-            id={`ed-title-${phase.id}`}
-            name="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-          />
-        </div>
-        <div className="form-field">
-          <label htmlFor={`ed-obj-${phase.id}`}>Objectif</label>
-          <textarea
-            id={`ed-obj-${phase.id}`}
-            name="objective"
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-            rows={2}
-          />
-        </div>
-        <div className="form-field">
-          <label htmlFor={`ed-act-${phase.id}`}>Action demandée</label>
-          <textarea
-            id={`ed-act-${phase.id}`}
-            name="action"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-            rows={2}
-          />
-        </div>
-        <div className="form-field">
-          <label htmlFor={`ed-next-${phase.id}`}>Prochaine étape (indice)</label>
-          <textarea
-            id={`ed-next-${phase.id}`}
-            name="nextHint"
-            value={nextHint}
-            onChange={(e) => setNextHint(e.target.value)}
-            rows={2}
-          />
-        </div>
-
-        {showTacticalBlock ? (
-          <>
-            <h4 className="phase-edit-box__title" style={{ fontSize: "1rem", marginTop: "0.5rem" }}>
-              Swordland — champs tactiques
-            </h4>
-            <p className="field-hint">
-              Bâtiments et assignations (Ouest / Est détaillés dans l’objectif et les tableaux ORBAT générés).
-              Un nom ou un bâtiment par ligne ; la virgule est aussi acceptée.
-            </p>
-            <div className="form-field">
-              <label htmlFor={`ed-bld-${phase.id}`}>Bâtiments ciblés</label>
-              <textarea
-                id={`ed-bld-${phase.id}`}
-                name="targetedBuildings"
-                value={buildingsText}
-                onChange={(e) => setBuildingsText(e.target.value)}
-                rows={3}
-                placeholder={"Bell Tower\nSanctum 1"}
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor={`ed-ld-${phase.id}`}>Leaders assignés</label>
-              <textarea
-                id={`ed-ld-${phase.id}`}
-                name="assignedLeaders"
-                value={leadersText}
-                onChange={(e) => setLeadersText(e.target.value)}
-                rows={2}
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor={`ed-pl-${phase.id}`}>Joueurs assignés</label>
-              <textarea
-                id={`ed-pl-${phase.id}`}
-                name="assignedPlayers"
-                value={playersText}
-                onChange={(e) => setPlayersText(e.target.value)}
-                rows={3}
-              />
-            </div>
-          </>
-        ) : null}
-
-        <div className="form-field">
-          <label htmlFor={`ed-discord-${phase.id}`}>
-            Message Discord final (optionnel)
-          </label>
-          <textarea
-            id={`ed-discord-${phase.id}`}
-            name="customDiscordText"
-            value={customDiscord}
-            onChange={(e) => setCustomDiscord(e.target.value)}
-            rows={6}
-            placeholder="Si renseigné, remplace l’aperçu structuré à droite."
-          />
-          <p className="field-hint">
-            Laissez vide pour utiliser le rendu automatique à partir du titre, de l’objectif, de l’action et du prochain pas.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="btn btn-ghost btn-small"
-          onClick={() => setAdvOpen(!advOpen)}
+        <div
+          id="editor-panel-preview"
+          role="tabpanel"
+          aria-labelledby="editor-tab-preview"
+          hidden={mainTab !== "preview"}
         >
-          {advOpen ? "▼ Masquer avancé" : "▶ Options avancées"}
-        </button>
-        {advOpen ? (
-          <div className="advanced-block">
-            <p className="field-hint">
-              Clé technique (commandes bot) — ne modifie que si nécessaire.
-            </p>
-            <div className="form-field">
-              <label htmlFor={`ed-key-${phase.id}`}>Clé</label>
-              <input
-                id={`ed-key-${phase.id}`}
-                value={keyDraft}
-                onChange={(e) => setKeyDraft(e.target.value)}
-                autoComplete="off"
-              />
+          <div className="mx-auto w-full max-w-[1440px] space-y-3">
+            <div className="font-rajdhani text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Discord & édition — un seul aperçu, mis à jour en direct
+            </div>
+            <div className="grid min-h-[min(76vh,880px)] grid-cols-1 gap-4 xl:grid-cols-2 xl:items-stretch xl:gap-6">
+              <div className="flex min-h-0 min-w-0 flex-col gap-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-rajdhani text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    Aperçu Discord
+                  </span>
+                  <span className="text-[10px] text-slate-600">
+                    Live · champs + override
+                  </span>
+                </div>
+                <div className="flex min-h-[280px] flex-1 flex-col overflow-hidden rounded-2xl border border-[#1e2230] bg-[#121826] shadow-xl shadow-black/35 ring-1 ring-white/[0.05] xl:min-h-0">
+                  <DiscordPreview
+                    phases={phasesForDiscordPreview}
+                    durationMinutes={initialEventDurationMinutes}
+                    highlightPhaseId={selectedId}
+                    layoutMode="focused"
+                    onPhaseChange={setSelectedId}
+                    className="h-full min-h-[260px] flex-1 rounded-none border-0"
+                  />
+                </div>
+              </div>
+
+              <div className="flex min-h-0 min-w-0 flex-col">
+                <div className="flex min-h-[min(52vh,600px)] flex-1 flex-col overflow-hidden rounded-2xl border border-[#1e2230] bg-[#121826] shadow-xl shadow-black/40 ring-1 ring-amber-500/[0.08] xl:min-h-0">
+              {selected ? (
+                <PhaseEditor
+                  phase={selected}
+                  templateId={templateId}
+                  eventProductKey={eventProductKey}
+                  eventDurationMinutes={initialEventDurationMinutes}
+                  onClose={() => setSelectedId(null)}
+                  onLiveDraftChange={handleLiveDiscordDraft}
+                />
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+                  <div className="h-12 w-12 rounded-2xl border border-[#1e2230] bg-[#0B0F17]" />
+                  <p className="text-sm font-medium text-slate-400">
+                    Aucune phase sélectionnée
+                  </p>
+                  <p className="max-w-[18rem] text-xs leading-relaxed text-slate-600">
+                    Retournez sur l’onglet{" "}
+                    <span className="text-slate-400">Mission flow</span> et
+                    cliquez une carte pour l’éditer ici.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMainTab("flow")}
+                    className="mt-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-2 text-xs font-bold text-amber-500 transition-colors hover:bg-amber-500/15"
+                  >
+                    Ouvrir le mission flow
+                  </button>
+                </div>
+              )}
+                </div>
+              </div>
             </div>
           </div>
-        ) : null}
-
-        <button type="submit" className="btn btn-primary">
-          Enregistrer l’étape
-        </button>
-      </form>
-      <div className="phase-edit-box__discord-actions">
-        <form action={restorePhaseDiscordDraftAction}>
-          <input type="hidden" name="id" value={phase.id} />
-          <input type="hidden" name="templateId" value={templateId} />
-          <button
-            type="submit"
-            className="btn btn-secondary btn-small"
-            disabled={!phase.generatedDiscordDraft?.trim()}
-          >
-            Restaurer le brouillon généré
-          </button>
-        </form>
-        <form action={clearPhaseDiscordOverrideAction}>
-          <input type="hidden" name="id" value={phase.id} />
-          <input type="hidden" name="templateId" value={templateId} />
-          <button
-            type="submit"
-            className="btn btn-ghost btn-small"
-            disabled={
-              !customDiscord.trim() && !phase.customDiscordText?.trim()
-            }
-          >
-            Aperçu auto (champs)
-          </button>
-        </form>
+        </div>
       </div>
-    </div>
-  );
-}
-
-function GuidedAddPhase({
-  templateId,
-  timelineScope,
-}: {
-  templateId: string;
-  timelineScope: TimelineScope;
-}) {
-  const [minutes, setMinutes] = useState(0);
-  const [phaseType, setPhaseType] = useState("REMINDER");
-  const [title, setTitle] = useState("");
-  const [objective, setObjective] = useState("");
-  const [action, setAction] = useState("");
-  const [nextHint, setNextHint] = useState("");
-
-  return (
-    <div className="phase-edit-box phase-edit-box--add">
-      <h3 className="phase-edit-box__title">Ajouter une étape</h3>
-      <form
-        action={addPhaseAction}
-        className="form-stack"
-        onSubmit={(e) => {
-          if (!title.trim()) e.preventDefault();
-        }}
-      >
-        <input type="hidden" name="templateId" value={templateId} />
-        <input type="hidden" name="timelineScope" value={timelineScope} />
-        <input type="hidden" name="key" value="" />
-        <input
-          type="hidden"
-          name="offsetSeconds"
-          value={String(secondsFromMinutes(minutes))}
-        />
-        <input type="hidden" name="phaseType" value={phaseType} />
-
-        <div className="form-field">
-          <label>Minutes après le début</label>
-          <input
-            type="number"
-            min={0}
-            step={0.25}
-            value={minutes}
-            onChange={(e) => setMinutes(parseFloat(e.target.value) || 0)}
-          />
-        </div>
-        <div className="segmented-phase">
-          {PHASE_TYPES.map((pt) => (
-            <button
-              key={pt.id}
-              type="button"
-              className={`segmented-phase__btn ${phaseType === pt.id ? "segmented-phase__btn--on" : ""}`}
-              onClick={() => setPhaseType(pt.id)}
-            >
-              <span className="segmented-phase__label">{pt.label}</span>
-              <span className="segmented-phase__hint">{pt.hint}</span>
-            </button>
-          ))}
-        </div>
-        <div className="form-field">
-          <label>Titre</label>
-          <input
-            name="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            placeholder="Ex. Focus porte sud"
-          />
-        </div>
-        <div className="form-field">
-          <label>Objectif</label>
-          <textarea
-            name="objective"
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-            rows={2}
-          />
-        </div>
-        <div className="form-field">
-          <label>Action</label>
-          <textarea
-            name="action"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-            rows={2}
-          />
-        </div>
-        <div className="form-field">
-          <label>Indice « suite »</label>
-          <textarea
-            name="nextHint"
-            value={nextHint}
-            onChange={(e) => setNextHint(e.target.value)}
-            rows={2}
-          />
-        </div>
-
-        <div className="add-preview-inline">
-          <span className="muted">Aperçu live</span>
-          <TacticalPhasePreview
-            phaseType={phaseType}
-            title={title || "…"}
-            objective={objective}
-            action={action}
-            nextHint={nextHint}
-            customDiscordText={null}
-            compact
-            showMessageChrome={false}
-          />
-        </div>
-
-        <button type="submit" className="btn btn-primary" disabled={!title.trim()}>
-          Ajouter à la timeline
-        </button>
-      </form>
     </div>
   );
 }

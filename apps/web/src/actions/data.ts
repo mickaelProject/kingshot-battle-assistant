@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { BattlePhaseType, TemplateCreationSource } from "@prisma/client";
+import {
+  BattlePhaseType,
+  ManagedEventStatus,
+  Prisma,
+  TemplateCreationSource,
+} from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import type { TimelineScope } from "@/lib/timeline-scope";
 import { TIMELINE_SCOPES } from "@/lib/timeline-scope";
 import { prisma } from "@/lib/prisma";
@@ -58,6 +64,14 @@ export async function createTemplateAction(formData: FormData) {
   redirect(`/dashboard/templates/${created.id}/edit`);
 }
 
+function parseLegionStartOffsetMinutes(
+  raw: FormDataEntryValue | null,
+): number {
+  const n = Number.parseInt(String(raw ?? "0"), 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, 24 * 60);
+}
+
 export async function updateTemplateMetaAction(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
@@ -66,10 +80,22 @@ export async function updateTemplateMetaAction(formData: FormData) {
   const eventDurationMinutes = parseEventDurationMinutes(
     formData.get("eventDurationMinutes"),
   );
+  const legion1StartOffsetMinutes = parseLegionStartOffsetMinutes(
+    formData.get("legion1StartOffsetMinutes"),
+  );
+  const legion2StartOffsetMinutes = parseLegionStartOffsetMinutes(
+    formData.get("legion2StartOffsetMinutes"),
+  );
   if (!id || !name) return;
   await prisma.battleTemplate.update({
     where: { id },
-    data: { name, description, eventDurationMinutes },
+    data: {
+      name,
+      description,
+      eventDurationMinutes,
+      legion1StartOffsetMinutes,
+      legion2StartOffsetMinutes,
+    },
   });
   revalidatePath("/dashboard/templates");
   revalidatePath(`/dashboard/templates/${id}`);
@@ -178,6 +204,8 @@ export async function duplicateTemplateAction(formData: FormData) {
       name,
       description: src.description,
       eventDurationMinutes: src.eventDurationMinutes,
+      legion1StartOffsetMinutes: src.legion1StartOffsetMinutes ?? 0,
+      legion2StartOffsetMinutes: src.legion2StartOffsetMinutes ?? 0,
       creationSource: src.creationSource,
       eventProductKey: src.eventProductKey ?? undefined,
       isDefault: false,
@@ -390,14 +418,22 @@ export async function reorderTemplatePhasesAction(formData: FormData) {
     }
   }
 
-  await prisma.$transaction(
-    ids.map((phaseId, i) =>
-      prisma.battleEventDefinition.update({
-        where: { id: phaseId },
-        data: { orderIndex: i },
-      }),
-    ),
-  );
+  try {
+    await prisma.$transaction(
+      ids.map((phaseId, i) =>
+        prisma.battleEventDefinition.update({
+          where: { id: phaseId },
+          data: { orderIndex: i },
+        }),
+      ),
+    );
+  } catch (e) {
+    console.error("[reorderTemplatePhasesAction]", e);
+    return {
+      ok: false as const,
+      error: "Impossible d’enregistrer l’ordre (base de données). Réessayez.",
+    };
+  }
   revalidatePath(`/dashboard/templates/${templateId}/edit`);
   revalidatePath(`/dashboard/templates/${templateId}`);
   return { ok: true as const };
@@ -533,6 +569,156 @@ export type ManagedRunActionResult =
   | { ok: true }
   | { ok: false; error: string };
 
+function legionOffsetsFallbackMinutes(
+  scheduledAt: Date,
+  legion1StartsAt: Date | null,
+  legion2StartsAt: Date | null,
+): { legion1StartOffsetMinutes: number; legion2StartOffsetMinutes: number } {
+  const minutesAfter = (legion: Date | null) =>
+    legion != null
+      ? Math.max(
+          0,
+          Math.round((legion.getTime() - scheduledAt.getTime()) / 60_000),
+        )
+      : 0;
+  return {
+    legion1StartOffsetMinutes: minutesAfter(legion1StartsAt),
+    legion2StartOffsetMinutes: minutesAfter(legion2StartsAt),
+  };
+}
+
+/**
+ * Crée un ManagedEventRun : schéma courant (`legion*StartsAt`), sinon SQL brut avec
+ * ces colonnes, sinon SQL brut avec `legion*StartOffsetMinutes` (base entre deux migrations).
+ * Le client Prisma actuel n’a plus les champs offset : pas de `create()` avec offsets.
+ */
+async function createManagedEventRunRow(opts: {
+  guildSettingsId: string;
+  templateId: string;
+  channelId: string;
+  channelNameSnapshot: string | null;
+  scheduledAt: Date;
+  legion1StartsAt: Date | null;
+  legion2StartsAt: Date | null;
+}): Promise<{ id: string }> {
+  const common = {
+    guildSettingsId: opts.guildSettingsId,
+    templateId: opts.templateId,
+    channelId: opts.channelId,
+    channelNameSnapshot: opts.channelNameSnapshot,
+    scheduledAt: opts.scheduledAt,
+    status: ManagedEventStatus.SCHEDULED,
+  };
+
+  try {
+    return await prisma.managedEventRun.create({
+      data: {
+        ...common,
+        legion1StartsAt: opts.legion1StartsAt,
+        legion2StartsAt: opts.legion2StartsAt,
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const staleClient =
+      e instanceof Prisma.PrismaClientValidationError ||
+      /Unknown argument|Unknown field|legion1StartsAt/i.test(msg);
+    if (!staleClient) throw e;
+  }
+
+  const runId = randomUUID();
+  const now = new Date();
+  try {
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO "ManagedEventRun" (
+        "id",
+        "guildSettingsId",
+        "templateId",
+        "channelId",
+        "channelNameSnapshot",
+        "scheduledAt",
+        "legion1StartsAt",
+        "legion2StartsAt",
+        "createdAt",
+        "updatedAt"
+      )
+      VALUES (
+        ${runId},
+        ${opts.guildSettingsId},
+        ${opts.templateId},
+        ${opts.channelId},
+        ${opts.channelNameSnapshot},
+        ${opts.scheduledAt},
+        ${opts.legion1StartsAt},
+        ${opts.legion2StartsAt},
+        ${now},
+        ${now}
+      )
+      RETURNING "id"
+    `;
+    const id = rows[0]?.id;
+    if (!id) throw new Error("ManagedEventRun : RETURNING id vide.");
+    return { id };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const code =
+      e instanceof Prisma.PrismaClientKnownRequestError ? e.code : "";
+    const oldSchema =
+      code === "P2010" ||
+      code === "P2022" ||
+      /42703|does not exist|legion1StartsAt|column/i.test(msg);
+    if (!oldSchema) throw e;
+
+    const offsets = legionOffsetsFallbackMinutes(
+      opts.scheduledAt,
+      opts.legion1StartsAt,
+      opts.legion2StartsAt,
+    );
+    const legacyRunId = randomUUID();
+    const legacyNow = new Date();
+    try {
+      const legacyRows = await prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO "ManagedEventRun" (
+          "id",
+          "guildSettingsId",
+          "templateId",
+          "channelId",
+          "channelNameSnapshot",
+          "scheduledAt",
+          "legion1StartOffsetMinutes",
+          "legion2StartOffsetMinutes",
+          "createdAt",
+          "updatedAt"
+        )
+        VALUES (
+          ${legacyRunId},
+          ${opts.guildSettingsId},
+          ${opts.templateId},
+          ${opts.channelId},
+          ${opts.channelNameSnapshot},
+          ${opts.scheduledAt},
+          ${offsets.legion1StartOffsetMinutes},
+          ${offsets.legion2StartOffsetMinutes},
+          ${legacyNow},
+          ${legacyNow}
+        )
+        RETURNING "id"
+      `;
+      const legacyId = legacyRows[0]?.id;
+      if (!legacyId) {
+        throw new Error("ManagedEventRun (décalages légion) : RETURNING id vide.");
+      }
+      return { id: legacyId };
+    } catch (legacyErr) {
+      const detail =
+        legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
+      throw new Error(
+        `Impossible d’enregistrer le run. Exécutez les migrations Prisma dans apps/bot (colonnes legion1StartsAt / legion2StartsAt), puis \`npx prisma generate\`. — ${detail}`,
+      );
+    }
+  }
+}
+
 export async function createManagedRunAction(
   formData: FormData,
 ): Promise<ManagedRunActionResult> {
@@ -544,6 +730,32 @@ export async function createManagedRunAction(
     String(formData.get("channelNameSnapshot") ?? "").trim() || null;
   const whenRaw = String(formData.get("scheduledAt") ?? "");
   const launchNow = formData.get("launchNow") === "on";
+  const legion1StartsAtUtcRaw = String(
+    formData.get("legion1StartsAtUtc") ?? "",
+  ).trim();
+  const legion2StartsAtUtcRaw = String(
+    formData.get("legion2StartsAtUtc") ?? "",
+  ).trim();
+  let legion1StartsAt: Date | null = null;
+  let legion2StartsAt: Date | null = null;
+  if (legion1StartsAtUtcRaw) {
+    legion1StartsAt = new Date(legion1StartsAtUtcRaw);
+    if (Number.isNaN(legion1StartsAt.getTime())) {
+      return {
+        ok: false,
+        error: "Heure de début Légion 1 (UTC) invalide.",
+      };
+    }
+  }
+  if (legion2StartsAtUtcRaw) {
+    legion2StartsAt = new Date(legion2StartsAtUtcRaw);
+    if (Number.isNaN(legion2StartsAt.getTime())) {
+      return {
+        ok: false,
+        error: "Heure de début Légion 2 (UTC) invalide.",
+      };
+    }
+  }
 
   if (!guildSettingsId || !templateId) {
     return { ok: false, error: "Guilde ou modèle manquant." };
@@ -596,22 +808,23 @@ export async function createManagedRunAction(
     }
   }
 
-  const run = await prisma.managedEventRun.create({
-    data: {
-      guildSettingsId,
-      templateId,
-      channelId,
-      channelNameSnapshot,
-      scheduledAt,
-      status: "SCHEDULED",
-    },
+  const run = await createManagedEventRunRow({
+    guildSettingsId,
+    templateId,
+    channelId,
+    channelNameSnapshot,
+    scheduledAt,
+    legion1StartsAt,
+    legion2StartsAt,
   });
   try {
+    const l1 = legion1StartsAt?.toISOString() ?? "aligné alliance";
+    const l2 = legion2StartsAt?.toISOString() ?? "aligné alliance";
     await prisma.managedEventRunLog.create({
       data: {
         runId: run.id,
         level: "info",
-        message: `Run créé depuis l’admin · ${launchNow ? "immédiat" : `planifié ${scheduledAt.toISOString()}`} · salon ${channelId}`,
+        message: `Run créé depuis l’admin · ${launchNow ? "immédiat" : `planifié ${scheduledAt.toISOString()}`} · salon ${channelId} · L1 ${l1} · L2 ${l2}`,
       },
     });
   } catch {

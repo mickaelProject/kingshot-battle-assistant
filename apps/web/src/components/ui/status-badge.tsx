@@ -1,16 +1,27 @@
+"use client";
+
 import type { ManagedEventStatus } from "@prisma/client";
+import { useTranslations } from "next-intl";
 
-const LABELS: Record<string, string> = {
-  SCHEDULED: "Planifié",
-  STARTING: "Démarrage",
-  ACTIVE: "En cours",
-  COMPLETED: "Terminé",
-  FAILED: "Échec",
-  CANCELLED: "Annulé",
-};
+const BADGE_KEYS = [
+  "SCHEDULED",
+  "STARTING",
+  "ACTIVE",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+] as const;
 
-export function StatusBadge({ status }: { status: ManagedEventStatus | string }) {
+export function StatusBadge({
+  status,
+}: {
+  status: ManagedEventStatus | string;
+}) {
+  const t = useTranslations("runs.badges");
   const s = String(status);
   const cls = `status-badge status-badge--${s.toLowerCase()}`;
-  return <span className={cls}>{LABELS[s] ?? s}</span>;
+  const label = (BADGE_KEYS as readonly string[]).includes(s)
+    ? t(s as (typeof BADGE_KEYS)[number])
+    : s;
+  return <span className={cls}>{label}</span>;
 }

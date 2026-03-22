@@ -1,3 +1,11 @@
+import type { AppLocale } from "@/i18n/config";
+
+function offsetAtStart(locale: AppLocale): string {
+  if (locale === "en") return "At start";
+  if (locale === "es") return "Al inicio";
+  return "Au démarrage";
+}
+
 /** Compact “T+…” label for timeline rails (SaaS-style). */
 export function formatTimelineTLabel(seconds: number): string {
   if (seconds === 0) return "T+0";
@@ -14,8 +22,11 @@ export function formatTimelineTLabel(seconds: number): string {
 }
 
 /** User-facing label for seconds after battle start (T+0). */
-export function formatOffsetLabel(seconds: number): string {
-  if (seconds === 0) return "Au démarrage";
+export function formatOffsetLabel(
+  seconds: number,
+  locale: AppLocale = "fr",
+): string {
+  if (seconds === 0) return offsetAtStart(locale);
   if (seconds < 60) return `+${seconds}s`;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -36,7 +47,10 @@ export function templateDurationSeconds(
   return Math.max(...offsets);
 }
 
-export function formatDurationHuman(totalSeconds: number): string {
+export function formatDurationHuman(
+  totalSeconds: number,
+  _locale: AppLocale = "fr",
+): string {
   if (totalSeconds <= 0) return "—";
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const m = Math.floor(totalSeconds / 60);

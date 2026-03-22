@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { TemplateCreationSource } from "@prisma/client";
 import { duplicateTemplateAction } from "@/actions/data";
 import { DiscordInviteCta } from "@/components/discord-invite-cta";
@@ -17,6 +18,7 @@ import {
 } from "@/lib/time-human";
 
 export default async function TemplatesPage() {
+  const t = await getTranslations("templates");
   const discordInviteUrl = getDiscordBotInviteUrl();
   const installRedirectUri = getDiscordInstallRedirectUri();
   const [templates, guilds] = await Promise.all([
@@ -29,42 +31,37 @@ export default async function TemplatesPage() {
   return (
     <div className="dashboard-main templates-dashboard">
       <PageHeader
-        title="Arsenal de modèles"
-        description="Scénarios réutilisables : durée terrain, annonces Discord, lancement en un clic."
+        title={t("pageTitle")}
+        description={t("pageDesc")}
         actions={
           <div className="template-create-split">
             <Link
               href="/dashboard/templates/new/roster"
               className="btn btn-primary template-create-split__featured"
             >
-              Générer depuis un roster
+              {t("fromRoster")}
             </Link>
             <Link
               href="/dashboard/templates/new/manual"
               className="btn btn-secondary"
             >
-              Manuel
+              {t("manual")}
             </Link>
             <Link
               href="/dashboard/templates/new"
               className="btn btn-ghost btn-small template-create-split__more"
             >
-              Tous les modes
+              {t("allModes")}
             </Link>
           </div>
         }
       />
 
       {templates.length === 0 ? (
-        <SectionCard title="Aucun modèle">
+        <SectionCard title={t("emptyTitle")}>
           <p className="muted">
-            Créez un modèle ou initialisez depuis le bot.{" "}
-            {guilds.length === 0 ? (
-              <>
-                Aucun serveur en base : commencez par inviter le bot (voir
-                ci-dessous).
-              </>
-            ) : null}
+            {t("emptyBody")}{" "}
+            {guilds.length === 0 ? <>{t("emptyNoGuild")}</> : null}
           </p>
           {guilds.length === 0 ? (
             <DiscordInviteCta
@@ -75,83 +72,93 @@ export default async function TemplatesPage() {
           {guilds.length > 0 ? (
             <div className="btn-row" style={{ marginTop: "0.75rem" }}>
               <Link href="/dashboard/templates/new" className="btn btn-secondary">
-                Créer un modèle
+                {t("create")}
               </Link>
               <Link
                 href="/dashboard/templates/new/roster"
                 className="btn btn-ghost btn-small"
               >
-                Depuis un roster
+                {t("fromRosterShort")}
               </Link>
             </div>
           ) : null}
         </SectionCard>
       ) : (
         <div className="template-card-grid template-card-grid--premium">
-          {templates.map((t) => {
-            const offs = t.events.map((e) => e.offsetSeconds);
+          {templates.map((tmpl) => {
+            const offs = tmpl.events.map((e) => e.offsetSeconds);
             const durationSec = templateDurationSeconds(offs);
-            const phaseCount = t.events.length;
+            const phaseCount = tmpl.events.length;
             return (
-              <article key={t.id} className="template-card template-card--premium">
+              <article
+                key={tmpl.id}
+                className="template-card template-card--premium"
+              >
                 <div className="template-card__head">
-                  <h2 className="template-card__title">{t.name}</h2>
+                  <h2 className="template-card__title">{tmpl.name}</h2>
                   <div className="template-card__badges">
-                    {t.isDefault ? (
-                      <span className="badge default">Par défaut</span>
+                    {tmpl.isDefault ? (
+                      <span className="badge default">{t("badgeDefault")}</span>
                     ) : null}
-                    {t.creationSource ===
+                    {tmpl.creationSource ===
                     TemplateCreationSource.ROSTER_GENERATED ? (
                       <span className="badge badge--roster-src">
-                        Depuis roster
+                        {t("badgeRoster")}
                       </span>
                     ) : null}
                   </div>
                 </div>
-                {t.description ? (
-                  <p className="template-card__desc muted">{t.description}</p>
-                ) : (
-                  <p className="template-card__desc muted">Sans description</p>
-                )}
-                <TemplateMiniTimeline events={t.events} />
-                <dl className="template-card__meta">
+                <div className="template-card__body">
+                  {tmpl.description ? (
+                    <p className="template-card__desc muted">{tmpl.description}</p>
+                  ) : (
+                    <p className="template-card__desc template-card__desc--placeholder muted">
+                      {t("noDescription")}
+                    </p>
+                  )}
+                  <div className="template-card__frieze">
+                    <span className="template-card__eyebrow">{t("friezeLabel")}</span>
+                    <TemplateMiniTimeline events={tmpl.events} />
+                  </div>
+                </div>
+                <dl className="template-card__meta template-card__meta--panel">
                   <div>
-                    <dt>Durée bataille</dt>
-                    <dd>{t.eventDurationMinutes} min</dd>
+                    <dt>{t("metaDuration")}</dt>
+                    <dd>{tmpl.eventDurationMinutes} min</dd>
                   </div>
                   <div>
-                    <dt>Phases</dt>
+                    <dt>{t("metaPhases")}</dt>
                     <dd>{phaseCount}</dd>
                   </div>
                   <div>
-                    <dt>Annonces sur</dt>
+                    <dt>{t("metaAnnounce")}</dt>
                     <dd>~ {formatDurationHuman(durationSec)}</dd>
                   </div>
                 </dl>
                 <div className="template-card__actions">
                   <Link
-                    href={`/dashboard/templates/${t.id}/edit`}
+                    href={`/dashboard/templates/${tmpl.id}/edit`}
                     className="btn btn-secondary btn-small"
                   >
-                    Modifier
+                    {t("edit")}
                   </Link>
                   <form action={duplicateTemplateAction}>
-                    <input type="hidden" name="templateId" value={t.id} />
+                    <input type="hidden" name="templateId" value={tmpl.id} />
                     <button type="submit" className="btn btn-ghost btn-small">
-                      Dupliquer
+                      {t("duplicate")}
                     </button>
                   </form>
                   <Link
-                    href={`/dashboard/templates/${t.id}`}
+                    href={`/dashboard/templates/${tmpl.id}`}
                     className="btn btn-ghost btn-small"
                   >
-                    Voir
+                    {t("view")}
                   </Link>
                   <Link
-                    href={`/dashboard/events?templateId=${t.id}&guildId=${t.guildId}`}
+                    href={`/dashboard/events?templateId=${tmpl.id}&guildId=${tmpl.guildId}`}
                     className="btn btn-primary btn-small"
                   >
-                    Lancer
+                    {t("launch")}
                   </Link>
                 </div>
               </article>

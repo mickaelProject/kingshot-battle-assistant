@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { getTranslations } from "next-intl/server";
 import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import {
   fetchGuildTextChannelOptionsByGuildId,
@@ -17,6 +19,7 @@ export default async function ServerSettingsPage({
 }: {
   searchParams: Promise<{ code?: string; guild_id?: string }>;
 }) {
+  const t = await getTranslations("server");
   const sp = await searchParams;
   const fromDiscordInstall = Boolean(sp.code);
   const discordInviteUrl = getDiscordBotInviteUrl();
@@ -31,46 +34,27 @@ export default async function ServerSettingsPage({
   const discordConfigured = hasDiscordBotToken();
   const channelsByGuild = await fetchGuildTextChannelOptionsByGuildId(guilds);
 
+  const rich = {
+    bold: (chunks: ReactNode) => <strong>{chunks}</strong>,
+    mono: (chunks: ReactNode) => <code>{chunks}</code>,
+    cmd: (chunks: ReactNode) => <code>{chunks}</code>,
+  };
+
   return (
     <div className="dashboard-main">
-      <PageHeader
-        title="Réglages serveur"
-        description="Salon des annonces et modèle proposé par défaut — tout ce dont vos officiers ont besoin au quotidien."
-      />
+      <PageHeader title={t("pageTitle")} description={t("pageDesc")} />
 
       {fromDiscordInstall ? (
-        <div
-          className="discord-oauth-return-banner"
-          role="status"
-        >
-          <strong>Bot autorisé sur Discord</strong>
-          <p className="muted">
-            Si votre serveur n’apparaît pas encore, utilisez une commande slash du
-            bot (ex. <code>/setup channel</code>) en tant qu’administrateur Discord,
-            puis actualisez cette page.
-          </p>
+        <div className="discord-oauth-return-banner" role="status">
+          <strong>{t("oauthTitle")}</strong>
+          <p className="muted">{t.rich("oauthBody", rich)}</p>
         </div>
       ) : null}
 
       {guilds.length === 0 ? (
-        <SectionCard
-          title="Relier votre serveur Discord"
-          subtitle="Sans serveur enregistré, les modèles et événements ne peuvent pas cibler un salon."
-        >
-          <p className="muted">
-            Le tableau de bord lit la <strong>même base PostgreSQL</strong> que
-            le bot (<code>DATABASE_URL</code> identique dans{" "}
-            <code>apps/web/.env</code> et <code>apps/bot/.env</code>). Dès que le
-            bot rejoint un serveur (version à jour du code), la guilde est
-            enregistrée automatiquement — actualisez cette page.
-          </p>
-          <p className="muted server-empty-hint">
-            Si le serveur n’apparaît toujours pas : redémarrez le processus du
-            bot, ou en tant qu’<strong>administrateur Discord</strong> exécutez{" "}
-            <code>/setup channel</code> (salon des annonces) une fois, puis
-            actualisez. Vérifiez aussi que les commandes slash sont enregistrées
-            : <code>npm run commands:register -w @kingshot/bot</code>.
-          </p>
+        <SectionCard title={t("emptyTitle")} subtitle={t("emptySubtitle")}>
+          <p className="muted">{t.rich("emptyP1", rich)}</p>
+          <p className="muted server-empty-hint">{t.rich("emptyP2", rich)}</p>
           <DiscordInviteCta
             inviteUrl={discordInviteUrl}
             installRedirectUri={installRedirectUri}
@@ -90,19 +74,16 @@ export default async function ServerSettingsPage({
                 discordConfigured={discordConfigured}
                 serverLabel={
                   guilds.length === 1
-                    ? "Votre serveur Discord"
-                    : `Serveur ${index + 1}`
+                    ? t("serverOne")
+                    : t("serverN", { n: index + 1 })
                 }
               />
             ))}
           </div>
-          <SectionCard
-            title="Bientôt"
-            subtitle="Fonctions prévues — rien à configurer pour l’instant."
-          >
+          <SectionCard title={t("roadmapTitle")} subtitle={t("roadmapSubtitle")}>
             <ul className="server-roadmap muted">
-              <li>Intégration salons vocaux (briefing / coordination)</li>
-              <li>Traduction des annonces pour alliances internationales</li>
+              <li>{t("roadmap1")}</li>
+              <li>{t("roadmap2")}</li>
             </ul>
           </SectionCard>
         </>

@@ -40,6 +40,8 @@ export default async function EditTemplatePage({
       name={template.name}
       description={template.description}
       eventDurationMinutes={template.eventDurationMinutes}
+      legion1StartOffsetMinutes={template.legion1StartOffsetMinutes ?? 0}
+      legion2StartOffsetMinutes={template.legion2StartOffsetMinutes ?? 0}
       eventProductKey={template.eventProductKey ?? null}
       phases={phases}
       draftSource={draftSource}

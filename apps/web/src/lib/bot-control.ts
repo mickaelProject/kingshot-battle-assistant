@@ -1,5 +1,9 @@
 export type BotControlAction = "pause" | "resume" | "stop" | "next_phase";
 
+export type InvokeBotRunControlResult =
+  | { ok: true }
+  | { ok: false; error: string; httpStatus?: number };
+
 /**
  * Appelle l’API HTTP du bot (Bearer BOT_CONTROL_SECRET).
  * En prod : BOT_CONTROL_URL = URL publique du service (ex. https://xxx.up.railway.app).
@@ -7,7 +11,7 @@ export type BotControlAction = "pause" | "resume" | "stop" | "next_phase";
 export async function invokeBotRunControl(payload: {
   action: BotControlAction;
   runId: string;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<InvokeBotRunControlResult> {
   const base = process.env.BOT_CONTROL_URL?.trim().replace(/\/$/, "");
   const secret = process.env.BOT_CONTROL_SECRET?.trim();
   if (!base || !secret) {
@@ -40,12 +44,14 @@ export async function invokeBotRunControl(payload: {
       return {
         ok: false,
         error: data.error ?? `Erreur HTTP ${res.status}`,
+        httpStatus: res.status,
       };
     }
     if (data.ok === true) return { ok: true };
     return {
       ok: false,
       error: data.error ?? "Réponse inattendue du bot.",
+      httpStatus: res.status,
     };
   } catch (e) {
     return {

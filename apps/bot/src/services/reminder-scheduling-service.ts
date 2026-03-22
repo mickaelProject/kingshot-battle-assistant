@@ -6,6 +6,7 @@ import type { Client } from "discord.js";
 import { buildTacticalPhaseEmbed } from "../discord/tactical-announcement.js";
 import { prisma } from "../db/prisma.js";
 import { log } from "../util/log.js";
+import { translateTacticalFieldsToEn } from "../util/translate-to-en.js";
 
 type Scheduled = { timeout: NodeJS.Timeout; reminderId: string };
 
@@ -35,8 +36,11 @@ export class ReminderScheduler {
   }
 
   cancelForSession(sessionId: string): void {
-    for (const [id, s] of this.scheduled) {
-      if (id.startsWith(`${sessionId}:`)) {
+    const prefix = `${sessionId}:`;
+    const keys = [...this.scheduled.keys()].filter((id) => id.startsWith(prefix));
+    for (const id of keys) {
+      const s = this.scheduled.get(id);
+      if (s) {
         clearTimeout(s.timeout);
         this.scheduled.delete(id);
       }
@@ -204,12 +208,31 @@ export class ReminderScheduler {
       return;
     }
 
+    let title = payload.title;
+    let objective = payload.objective ?? "";
+    let action = payload.action ?? "";
+    let nextHint = payload.nextHint ?? "";
+    try {
+      const en = await translateTacticalFieldsToEn({
+        title,
+        objective,
+        action,
+        nextHint,
+      });
+      title = en.title;
+      objective = en.objective;
+      action = en.action;
+      nextHint = en.nextHint;
+    } catch {
+      /* traduction optionnelle — envoi du texte brut */
+    }
+
     const embed = buildTacticalPhaseEmbed({
       phaseType: payload.phaseType,
-      title: payload.title,
-      objective: payload.objective || undefined,
-      action: payload.action || undefined,
-      nextHint: payload.nextHint || undefined,
+      title,
+      objective: objective || undefined,
+      action: action || undefined,
+      nextHint: nextHint || undefined,
     });
 
     const channel = await this.client.channels.fetch(channelId);

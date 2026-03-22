@@ -20,7 +20,7 @@ export type LiveBattlePayload = {
   personalSlotLabel: string | null;
 };
 
-function buildingLabel(key: string | null): string | null {
+export function buildingLabel(key: string | null): string | null {
   if (!key?.trim()) return null;
   const k = key.trim();
   const pretty: Record<string, string> = {

@@ -189,6 +189,9 @@ export type ManagedRunDetailRow = {
   guildSettingsId: string;
   templateId: string;
   channelId: string;
+  /** Début timeline légion (UTC) au lancement ; null = aligné sur le départ alliance. */
+  legion1StartsAt: Date | null;
+  legion2StartsAt: Date | null;
   channelNameSnapshot: string | null;
   scheduledAt: Date;
   status: ManagedEventStatus;
@@ -220,7 +223,7 @@ export type ManagedRunDetailRow = {
   logs: { id: string; level: string; message: string; createdAt: Date }[];
 };
 
-type DetailFlags = ListFlags & { logs: boolean };
+type DetailFlags = ListFlags & { logs: boolean; runLegionOffsets: boolean };
 
 function buildRunDetailSelect(flags: DetailFlags): Prisma.ManagedEventRunSelect {
   return {
@@ -228,6 +231,12 @@ function buildRunDetailSelect(flags: DetailFlags): Prisma.ManagedEventRunSelect 
     guildSettingsId: true,
     templateId: true,
     channelId: true,
+    ...(flags.runLegionOffsets
+      ? {
+          legion1StartsAt: true,
+          legion2StartsAt: true,
+        }
+      : {}),
     ...(flags.channelNameSnapshot ? { channelNameSnapshot: true } : {}),
     scheduledAt: true,
     status: true,
@@ -316,6 +325,12 @@ function normalizeDetailRow(
     guildSettingsId: r.guildSettingsId as string,
     templateId: r.templateId as string,
     channelId: r.channelId as string,
+    legion1StartsAt: flags.runLegionOffsets
+      ? ((r.legion1StartsAt as Date | null | undefined) ?? null)
+      : null,
+    legion2StartsAt: flags.runLegionOffsets
+      ? ((r.legion2StartsAt as Date | null | undefined) ?? null)
+      : null,
     channelNameSnapshot: flags.channelNameSnapshot
       ? ((r.channelNameSnapshot as string | null) ?? null)
       : null,
@@ -355,6 +370,7 @@ export async function fetchManagedRunForDetailPage(
   let templateEventDuration = true;
   let sessionIsPaused = true;
   let logs = true;
+  let runLegionOffsets = true;
 
   for (let attempt = 0; attempt < 16; attempt++) {
     const flags: DetailFlags = {
@@ -362,6 +378,7 @@ export async function fetchManagedRunForDetailPage(
       templateEventDuration,
       sessionIsPaused,
       logs,
+      runLegionOffsets,
     };
     try {
       const raw = await prisma.managedEventRun.findUnique({
@@ -381,6 +398,11 @@ export async function fetchManagedRunForDetailPage(
         if (/channelNameSnapshot/i.test(blob)) channelNameSnapshot = false;
         else if (/eventDurationMinutes/i.test(blob)) templateEventDuration = false;
         else if (/isPaused/i.test(blob)) sessionIsPaused = false;
+        else if (
+          /legion1StartsAt/i.test(blob) &&
+          /ManagedEventRun/i.test(blob)
+        )
+          runLegionOffsets = false;
         else throw e;
         continue;
       }

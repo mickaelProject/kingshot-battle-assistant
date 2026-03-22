@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { isAdminAuthenticated, loginWithSecret } from "@/lib/auth";
 
@@ -6,6 +7,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  const t = await getTranslations("login");
   if (await isAdminAuthenticated()) redirect("/dashboard");
   const sp = await searchParams;
 
@@ -19,15 +21,12 @@ export default async function LoginPage({
 
   return (
     <main style={{ maxWidth: 400, marginTop: "4rem" }}>
-      <h1>Admin login</h1>
-      <p className="muted">
-        Enter the same value as <code>ADMIN_PANEL_SECRET</code> in your{" "}
-        <code>.env</code>.
-      </p>
-      {sp.error ? <p className="err">Invalid secret.</p> : null}
+      <h1>{t("title")}</h1>
+      <p className="muted">{t("hint")}</p>
+      {sp.error ? <p className="err">{t("error")}</p> : null}
       <form action={login} className="stack" style={{ marginTop: "1.5rem" }}>
         <div>
-          <label htmlFor="secret">Secret</label>
+          <label htmlFor="secret">{t("secretLabel")}</label>
           <input
             id="secret"
             name="secret"
@@ -37,7 +36,7 @@ export default async function LoginPage({
           />
         </div>
         <button type="submit" className="primary">
-          Sign in
+          {t("submit")}
         </button>
       </form>
     </main>

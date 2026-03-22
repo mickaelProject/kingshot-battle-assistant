@@ -2,7 +2,50 @@
  * Pure helpers for battle template timelines (unit-tested, no Prisma).
  */
 
-import type { BattlePhaseType } from "@prisma/client";
+import type { BattlePhaseType, TimelineScope } from "@prisma/client";
+
+export type LegionAnchorTemplate = {
+  legion1StartOffsetMinutes: number;
+  legion2StartOffsetMinutes: number;
+};
+
+/** Minutes entre le T+0 alliance et le T+0 de la timeline de cette portée. */
+export function legionAnchorOffsetMinutes(
+  scope: TimelineScope,
+  t: LegionAnchorTemplate,
+): number {
+  if (scope === "LEGION_1") return Math.max(0, t.legion1StartOffsetMinutes);
+  if (scope === "LEGION_2") return Math.max(0, t.legion2StartOffsetMinutes);
+  return 0;
+}
+
+/**
+ * Offset phase (secondes depuis le T+0 de la légion) → secondes depuis le T+0 alliance
+ * (référence commune pour l’horloge des annonces Discord).
+ */
+export function allianceClockOffsetSeconds(
+  phaseOffsetSeconds: number,
+  scope: TimelineScope,
+  t: LegionAnchorTemplate,
+): number {
+  return legionAnchorOffsetMinutes(scope, t) * 60 + phaseOffsetSeconds;
+}
+
+const DISCORD_TIMELINE_SCOPES: TimelineScope[] = [
+  "GLOBAL",
+  "LEGION_1",
+  "LEGION_2",
+];
+
+export function isDiscordTimelineScope(scope: TimelineScope): boolean {
+  return DISCORD_TIMELINE_SCOPES.includes(scope);
+}
+
+export function legionPhaseTitlePrefix(scope: TimelineScope): string {
+  if (scope === "LEGION_1") return "Légion 1 · ";
+  if (scope === "LEGION_2") return "Légion 2 · ";
+  return "";
+}
 
 export interface OffsetEvent {
   offsetSeconds: number;

@@ -1,6 +1,10 @@
 import Link from "next/link";
+import { getLocale, getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
+import type { AppLocale } from "@/i18n/config";
 import { RunActiveControls } from "@/components/run-active-controls";
+import type { RunDetailTabId } from "@/components/run-detail-tabs";
+import { RunDetailTabs } from "@/components/run-detail-tabs";
 import { RunMissionStrip } from "@/components/run-mission-strip";
 import { RunPlayerLiveLink } from "@/components/run-player-live-link";
 import { RunVerticalTimeline } from "@/components/run-vertical-timeline";
@@ -18,6 +22,9 @@ export default async function RunDetailPage({
   const run = await fetchManagedRunForDetailPage(id);
   if (!run) notFound();
 
+  const locale = (await getLocale()) as AppLocale;
+  const t = await getTranslations("runs.detail");
+
   const reminders = run.session?.reminders ?? [];
   const nextPending = reminders.find((x) => x.status === "PENDING");
   const phasesTotal =
@@ -32,6 +39,140 @@ export default async function RunDetailPage({
   const canControl =
     run.status === "ACTIVE" && Boolean(run.battleSessionId) && run.session;
   const isPaused = Boolean(run.session?.isPaused);
+
+  const defaultTab: RunDetailTabId = canControl ? "pilotage" : "timeline";
+
+  const formatLegionUtc = (d: Date | null) =>
+    d
+      ? d.toLocaleString(locale, {
+          timeZone: "UTC",
+          dateStyle: "short",
+          timeStyle: "short",
+        }) + " UTC"
+      : t("summaryLegionAligned");
+
+  const pilotagePanel = canControl ? (
+    <section className="control-deck" aria-label={t("controlTitle")}>
+      <div className="control-deck__head">
+        <h2 className="control-deck__title">{t("controlTitle")}</h2>
+        <p className="control-deck__hint muted">{t("controlHint")}</p>
+      </div>
+      <RunActiveControls
+        runId={run.id}
+        isPaused={isPaused}
+        redirectPath={`/dashboard/runs/${run.id}`}
+      />
+    </section>
+  ) : (
+    <p className="muted run-detail-tabs__idle">{t("pilotageIdle")}</p>
+  );
+
+  const timelinePanel = (
+    <SectionCard
+      title={t("timelineTitle")}
+      subtitle={
+        run.session ? t("timelineSubOn") : t("timelineSubOff")
+      }
+      className="section-card--timeline section-card--run-vt"
+    >
+      {!run.session || run.session.reminders.length === 0 ? (
+        <p className="muted">
+          {run.status === "SCHEDULED"
+            ? t("timelineWaitBot")
+            : t("timelineNoReminders")}
+        </p>
+      ) : (
+        <RunVerticalTimeline
+          runStatus={run.status}
+          startedAt={run.session.startedAt}
+          reminders={run.session.reminders}
+        />
+      )}
+    </SectionCard>
+  );
+
+  const detailsPanel = (
+    <div className="run-detail-tabs__details-stack">
+      <SectionCard title={t("summaryTitle")}>
+        <dl className="review-dl run-detail__dl">
+          <dt>{t("summaryStatus")}</dt>
+          <dd>
+            <StatusBadge status={run.status} />
+          </dd>
+          <dt>{t("summaryPhases")}</dt>
+          <dd>
+            {phasesTotal > 0 ? (
+              t("summaryPhasesDone", { done: phasesDone, total: phasesTotal })
+            ) : (
+              <span className="muted">—</span>
+            )}
+          </dd>
+          <dt>{t("summaryDuration")}</dt>
+          <dd>
+            <strong>{run.template.eventDurationMinutes} min</strong>
+          </dd>
+          <dt>{t("summaryCoverage")}</dt>
+          <dd>{formatDurationHuman(timelineLastSec, locale)}</dd>
+          {run.legion1StartsAt != null || run.legion2StartsAt != null ? (
+            <>
+              <dt>{t("summaryLegion")}</dt>
+              <dd>
+                L1 : {formatLegionUtc(run.legion1StartsAt)}
+                {" · "}
+                L2 : {formatLegionUtc(run.legion2StartsAt)}
+              </dd>
+            </>
+          ) : null}
+        </dl>
+        {run.errorMessage ? (
+          <div className="run-error-block">
+            <strong>{t("failHeading")}</strong>
+            <p>{run.errorMessage}</p>
+          </div>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard title={t("playerTitle")} subtitle={t("playerSub")}>
+        <RunPlayerLiveLink runId={run.id} />
+      </SectionCard>
+
+      <SectionCard title={t("refTitle")} subtitle={t("refSub")}>
+        <ul className="timeline-list timeline-list--compact">
+          {run.template.events.map((ev, i) => (
+            <li key={i} className="timeline-item timeline-item--ref">
+              <div className="timeline-item__time">
+                {formatOffsetLabel(ev.offsetSeconds, locale)}
+              </div>
+              <div className="timeline-item__body">
+                <span className="timeline-item__type muted">
+                  {ev.phaseType}
+                </span>
+                <div className="timeline-item__title">{ev.title}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </SectionCard>
+
+      <SectionCard title={t("logTitle")} subtitle={t("logSub")}>
+        {run.logs.length === 0 ? (
+          <p className="muted">{t("logEmpty")}</p>
+        ) : (
+          <ul className="run-log-list run-log-list--detail">
+            {run.logs.map((log) => (
+              <li key={log.id} className={`run-log run-log--${log.level}`}>
+                <time dateTime={log.createdAt.toISOString()}>
+                  {new Date(log.createdAt).toLocaleString()}
+                </time>
+                <span className="run-log__level">{log.level}</span>
+                <span className="run-log__msg">{log.message}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
+    </div>
+  );
 
   return (
     <div className="dashboard-main run-detail run-detail--immersive">
@@ -50,7 +191,7 @@ export default async function RunDetailPage({
         </div>
         <h1 className="run-detail-hero__title">{run.template.name}</h1>
         <p className="run-detail-hero__meta muted">
-          Départ prévu · {new Date(run.scheduledAt).toLocaleString()}
+          Départ prévu · {new Date(run.scheduledAt).toLocaleString(locale)}
           {run.channelNameSnapshot ? (
             <>
               {" "}
@@ -74,127 +215,12 @@ export default async function RunDetailPage({
         ) : null}
       </header>
 
-      {canControl ? (
-        <section className="control-deck" aria-label="Contrôle mission">
-          <div className="control-deck__head">
-            <h2 className="control-deck__title">Console tactique</h2>
-            <p className="control-deck__hint muted">
-              Pause, reprise, phase suivante ou arrêt — exécuté par le bot sur
-              l’API locale.
-            </p>
-          </div>
-          <RunActiveControls
-            runId={run.id}
-            isPaused={isPaused}
-            redirectPath={`/dashboard/runs/${run.id}`}
-          />
-        </section>
-      ) : null}
-
-      <div className="run-detail__grid run-detail__grid--split">
-        <SectionCard
-          title="Timeline mission"
-          subtitle={
-            run.session
-              ? "Phases Discord — la ligne mise en avant est la phase active ou la prochaine."
-              : "La timeline apparaît quand la session est créée."
-          }
-          className="section-card--timeline section-card--run-vt"
-        >
-          {!run.session || run.session.reminders.length === 0 ? (
-            <p className="muted">
-              {run.status === "SCHEDULED"
-                ? "Session pas encore créée — le bot initialisera la timeline au lancement."
-                : "Aucun rappel en base pour cette session."}
-            </p>
-          ) : (
-            <RunVerticalTimeline
-              runStatus={run.status}
-              startedAt={run.session.startedAt}
-              reminders={run.session.reminders}
-            />
-          )}
-        </SectionCard>
-
-        <div className="run-detail__aside">
-          <SectionCard title="Synthèse">
-            <dl className="review-dl run-detail__dl">
-              <dt>Statut</dt>
-              <dd>
-                <StatusBadge status={run.status} />
-              </dd>
-              <dt>Phases annonces</dt>
-              <dd>
-                {phasesTotal > 0 ? (
-                  <>
-                    {phasesDone} / {phasesTotal} traitées
-                  </>
-                ) : (
-                  <span className="muted">—</span>
-                )}
-              </dd>
-              <dt>Durée événement (terrain)</dt>
-              <dd>
-                <strong>{run.template.eventDurationMinutes} min</strong>
-              </dd>
-              <dt>Couverture annonces</dt>
-              <dd>{formatDurationHuman(timelineLastSec)}</dd>
-            </dl>
-            {run.errorMessage ? (
-              <div className="run-error-block">
-                <strong>Échec</strong>
-                <p>{run.errorMessage}</p>
-              </div>
-            ) : null}
-          </SectionCard>
-
-          <SectionCard
-            title="Vue joueur (lien)"
-            subtitle="Hors /dashboard — écran minimal pour l’équipe."
-          >
-            <RunPlayerLiveLink runId={run.id} />
-          </SectionCard>
-
-          <SectionCard
-            title="Modèle (référence)"
-            subtitle="Plan théorique pour comparaison."
-          >
-            <ul className="timeline-list timeline-list--compact">
-              {run.template.events.map((ev, i) => (
-                <li key={i} className="timeline-item timeline-item--ref">
-                  <div className="timeline-item__time">
-                    {formatOffsetLabel(ev.offsetSeconds)}
-                  </div>
-                  <div className="timeline-item__body">
-                    <span className="timeline-item__type muted">
-                      {ev.phaseType}
-                    </span>
-                    <div className="timeline-item__title">{ev.title}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </SectionCard>
-
-          <SectionCard title="Journal technique" subtitle="Ordre chronologique.">
-            {run.logs.length === 0 ? (
-              <p className="muted">Aucune entrée.</p>
-            ) : (
-              <ul className="run-log-list run-log-list--detail">
-                {run.logs.map((log) => (
-                  <li key={log.id} className={`run-log run-log--${log.level}`}>
-                    <time dateTime={log.createdAt.toISOString()}>
-                      {new Date(log.createdAt).toLocaleString()}
-                    </time>
-                    <span className="run-log__level">{log.level}</span>
-                    <span className="run-log__msg">{log.message}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SectionCard>
-        </div>
-      </div>
+      <RunDetailTabs
+        defaultTab={defaultTab}
+        pilotage={pilotagePanel}
+        timeline={timelinePanel}
+        details={detailsPanel}
+      />
     </div>
   );
 }

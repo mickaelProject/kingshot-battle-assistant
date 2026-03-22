@@ -11,20 +11,40 @@ export type OverviewActivityItem = {
 
 export function OverviewActivityFeed({
   items,
+  emptyTitle,
+  emptySub,
+  openRunLabel,
+  locale,
 }: {
   items: OverviewActivityItem[];
+  emptyTitle: string;
+  emptySub: string;
+  openRunLabel: string;
+  locale: string;
 }) {
   if (items.length === 0) {
     return (
-      <div className="activity-feed activity-feed--empty">
-        <p className="activity-feed__empty-title">Aucune activité récente</p>
-        <p className="muted activity-feed__empty-desc">
-          Les journaux techniques apparaîtront ici dès qu’un événement démarre ou
-          change d’état.
-        </p>
-        <Link href="/dashboard/events" className="btn btn-secondary btn-small">
-          Lancer une mission
-        </Link>
+      <div className="py-10 text-center">
+        <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[#1e2230]">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="text-slate-600"
+            aria-hidden
+          >
+            <path
+              d="M22 12h-4l-3 9L9 3l-3 9H2"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+        <div className="mb-1 text-sm text-slate-600">{emptyTitle}</div>
+        <div className="text-xs text-slate-700">{emptySub}</div>
       </div>
     );
   }
@@ -62,7 +82,7 @@ export function OverviewActivityFeed({
                   </>
                 ) : null}
                 <Link href={`/dashboard/runs/${row.runId}`} className="text-link">
-                  Ouvrir l’exécution
+                  {openRunLabel}
                 </Link>
               </p>
             </div>

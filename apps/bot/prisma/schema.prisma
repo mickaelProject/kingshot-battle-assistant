@@ -40,6 +40,10 @@ model BattleTemplate {
   eventProductKey String?
   /// Durée réelle de l’événement en jeu (brief → fin), distincte de la timeline d’annonces Discord.
   eventDurationMinutes Int @default(60)
+  /// Minutes après le T+0 **alliance** (annonces Discord) où commence le T+0 de la timeline **Légion 1** (fiches / planification).
+  legion1StartOffsetMinutes Int @default(0)
+  /// Idem pour la timeline Légion 2 (ex. autre créneau horaire in-game).
+  legion2StartOffsetMinutes Int @default(0)
   /// Manuel vs brouillon généré depuis un roster (badge UI + traçabilité).
   creationSource TemplateCreationSource @default(MANUAL)
   isDefault   Boolean  @default(false)
@@ -91,7 +95,7 @@ enum BattlePhaseType {
   FINAL
 }
 
-/// Portée de la phase : annonces Discord = GLOBAL uniquement (Légions = planification / export).
+/// Portée de la phase : GLOBAL + LEGION_* = annonces Discord (même salon) ; horloge légion vs alliance via décalages modèle.
 enum TimelineScope {
   GLOBAL
   LEGION_1
@@ -138,6 +142,10 @@ model ManagedEventRun {
   channelNameSnapshot String?
   /// When the bot should start the battle (UTC).
   scheduledAt     DateTime
+  /// Début effectif timeline Légion 1 (UTC), saisi au lancement ; null = aligné sur `scheduledAt`.
+  legion1StartsAt DateTime?
+  /// Idem Légion 2.
+  legion2StartsAt DateTime?
   status          ManagedEventStatus @default(SCHEDULED)
   battleSessionId String?            @unique
   errorMessage    String?

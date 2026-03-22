@@ -1,14 +1,22 @@
 "use client";
 
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   createManagedRunAction,
   type ManagedRunActionResult,
 } from "@/actions/data";
+import type { AppLocale } from "@/i18n/config";
 import { formatDurationHuman } from "@/lib/time-human";
+import {
+  addMinutesUtc,
+  formatUtcDatetimeInputValue,
+  parseUtcDatetimeInputToDate,
+} from "@/lib/utc-legion-start-input";
 import { DiscordInviteCta } from "@/components/discord-invite-cta";
+import { UtcLegionDatetimeField } from "@/components/utc-legion-datetime-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 
@@ -20,12 +28,11 @@ type Guild = {
 type Template = { id: string; name: string; guildId: string };
 type ChannelOpt = { id: string; name: string };
 
-const STEPS = [
-  "Choisir le modèle",
-  "Choisir le salon",
-  "Quand lancer ?",
-  "Vérifier & confirmer",
-] as const;
+type PhasePreviewRow = {
+  offsetLabel: string;
+  phaseType: string;
+  title: string;
+};
 
 export function EventsWizard({
   guilds,
@@ -48,12 +55,13 @@ export function EventsWizard({
       phaseCount: number;
       durationSec: number;
       eventDurationMinutes: number;
+      hasLegionPhases: boolean;
+      legionTimelinesNeedSchedule: boolean;
+      legion1StartOffsetMinutes: number;
+      legion2StartOffsetMinutes: number;
     }
   >;
-  templatesPhasePreview: Record<
-    string,
-    { offsetLabel: string; typeLabel: string; title: string }[]
-  >;
+  templatesPhasePreview: Record<string, PhasePreviewRow[]>;
   channelsByGuildId: Record<string, ChannelOpt[]>;
   discordConfigured: boolean;
   discordInviteUrl: string | null;
@@ -62,6 +70,8 @@ export function EventsWizard({
   initialGuildSettingsId?: string;
   scheduleMode: boolean;
 }) {
+  const t = useTranslations("eventsWizard");
+  const locale = useLocale() as AppLocale;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [step, setStep] = useState(0);
@@ -70,11 +80,19 @@ export function EventsWizard({
   const [channelNameSnapshot, setChannelNameSnapshot] = useState("");
   const [launchNow, setLaunchNow] = useState(!scheduleMode);
   const [scheduledAt, setScheduledAt] = useState("");
+  /** Saisie interprétée comme UTC : `YYYY-MM-DDTHH:mm`. */
+  const [legion1StartsAtUtc, setLegion1StartsAtUtc] = useState("");
+  const [legion2StartsAtUtc, setLegion2StartsAtUtc] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const steps = useMemo(
+    () => [t("step0"), t("step1"), t("step2"), t("step3")],
+    [t],
+  );
+
   const guildSettingsId = useMemo(() => {
-    const t = templates.find((x) => x.id === templateId);
-    return t?.guildId ?? "";
+    const tmpl = templates.find((x) => x.id === templateId);
+    return tmpl?.guildId ?? "";
   }, [templates, templateId]);
 
   const channels = channelsByGuildId[guildSettingsId] ?? [];
@@ -96,16 +114,83 @@ export function EventsWizard({
   }, [guildSettingsId, pickDefaultChannel]);
 
   useEffect(() => {
-    if (initialTemplateId && templates.some((t) => t.id === initialTemplateId)) {
+    if (initialTemplateId && templates.some((x) => x.id === initialTemplateId)) {
       setTemplateId(initialTemplateId);
       setStep(1);
     }
     if (initialGuildSettingsId) {
-      /* optional preselect guild filter — templates carry guild */
+      /* pré-sélection guilde optionnelle */
     }
   }, [initialTemplateId, templates]);
 
+  useEffect(() => {
+    const m = templateId ? templatesMeta[templateId] : null;
+    if (!m?.legionTimelinesNeedSchedule) return;
+    setLaunchNow(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- meta serveur stable par `templateId`
+  }, [templateId]);
+
+  /** Deux timelines légion : préremplissage depuis l’instant présent (pas de date « alliance » séparée). */
+  useEffect(() => {
+    const m = templateId ? templatesMeta[templateId] : null;
+    if (!m?.hasLegionPhases || !m.legionTimelinesNeedSchedule) return;
+    const base = new Date();
+    setLegion1StartsAtUtc(
+      formatUtcDatetimeInputValue(
+        addMinutesUtc(base, m.legion1StartOffsetMinutes),
+      ),
+    );
+    setLegion2StartsAtUtc(
+      formatUtcDatetimeInputValue(
+        addMinutesUtc(base, m.legion2StartOffsetMinutes),
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId]);
+
+  useEffect(() => {
+    const m = templateId ? templatesMeta[templateId] : null;
+    if (!m?.hasLegionPhases) {
+      setLegion1StartsAtUtc("");
+      setLegion2StartsAtUtc("");
+      return;
+    }
+    if (m.legionTimelinesNeedSchedule) return;
+
+    let base: Date;
+    if (launchNow) {
+      base = new Date();
+    } else {
+      const raw = scheduledAt.trim();
+      if (!raw) {
+        setLegion1StartsAtUtc("");
+        setLegion2StartsAtUtc("");
+        return;
+      }
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) {
+        setLegion1StartsAtUtc("");
+        setLegion2StartsAtUtc("");
+        return;
+      }
+      base = d;
+    }
+    setLegion1StartsAtUtc(
+      formatUtcDatetimeInputValue(
+        addMinutesUtc(base, m.legion1StartOffsetMinutes),
+      ),
+    );
+    setLegion2StartsAtUtc(
+      formatUtcDatetimeInputValue(
+        addMinutesUtc(base, m.legion2StartOffsetMinutes),
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `templatesMeta` stable par rendu serveur
+  }, [templateId, launchNow, scheduledAt]);
+
   const meta = templateId ? templatesMeta[templateId] : null;
+  const legionTimelinesNeedSchedule =
+    meta?.legionTimelinesNeedSchedule ?? false;
   const phasePreview = templateId
     ? templatesPhasePreview[templateId] ?? []
     : [];
@@ -116,7 +201,29 @@ export function EventsWizard({
     channels.some((c) => c.id === channelId) &&
     discordConfigured &&
     channels.length > 0;
-  const canNext2 = launchNow || Boolean(scheduledAt.trim());
+  const legionUtcOk =
+    !meta?.hasLegionPhases ||
+    (parseUtcDatetimeInputToDate(legion1StartsAtUtc) != null &&
+      parseUtcDatetimeInputToDate(legion2StartsAtUtc) != null);
+
+  const canNext2 =
+    legionUtcOk &&
+    (legionTimelinesNeedSchedule ||
+      launchNow ||
+      Boolean(scheduledAt.trim()));
+
+  const phaseLabels = useMemo(
+    () => ({
+      START: t("phaseTypes.START"),
+      OBJECTIVE: t("phaseTypes.OBJECTIVE"),
+      REMINDER: t("phaseTypes.REMINDER"),
+      FINAL: t("phaseTypes.FINAL"),
+    }),
+    [t],
+  );
+  function phaseTypeLabel(phaseType: string): string {
+    return phaseLabels[phaseType as keyof typeof phaseLabels] ?? phaseType;
+  }
 
   async function submit(kind: "now" | "schedule") {
     setError(null);
@@ -125,8 +232,28 @@ export function EventsWizard({
     fd.set("templateId", templateId);
     fd.set("channelId", channelId);
     fd.set("channelNameSnapshot", channelNameSnapshot);
+    const m = templatesMeta[templateId];
+    let legionD1: Date | null = null;
+    let legionD2: Date | null = null;
+    if (m?.hasLegionPhases) {
+      legionD1 = parseUtcDatetimeInputToDate(legion1StartsAtUtc);
+      legionD2 = parseUtcDatetimeInputToDate(legion2StartsAtUtc);
+      if (!legionD1 || !legionD2) {
+        setError(t("legionUtcInvalid"));
+        return;
+      }
+      fd.set("legion1StartsAtUtc", legionD1.toISOString());
+      fd.set("legion2StartsAtUtc", legionD2.toISOString());
+    }
     if (kind === "now") {
       fd.set("launchNow", "on");
+    } else if (m?.legionTimelinesNeedSchedule && legionD1 && legionD2) {
+      fd.set(
+        "scheduledAt",
+        new Date(
+          Math.min(legionD1.getTime(), legionD2.getTime()),
+        ).toISOString(),
+      );
     } else {
       fd.set("scheduledAt", scheduledAt);
     }
@@ -134,9 +261,7 @@ export function EventsWizard({
       const r: ManagedRunActionResult = await createManagedRunAction(fd);
       if (r.ok) {
         const msg =
-          kind === "now"
-            ? "Lancement immédiat en file — le bot s’en occupe dans quelques secondes."
-            : "Événement planifié. Retrouve le suivi sous Exécutions.";
+          kind === "now" ? t("toastNow") : t("toastScheduled");
         router.push(
           `/dashboard/runs?toast=launched&toastMsg=${encodeURIComponent(msg)}`,
         );
@@ -150,14 +275,8 @@ export function EventsWizard({
   if (guilds.length === 0) {
     return (
       <div className="dashboard-main">
-        <PageHeader
-          title="Événements"
-          description="Aucun serveur Discord n’est encore relié à cette base."
-        />
-        <SectionCard
-          title="Relier un serveur"
-          subtitle="Invitez le bot, puis utilisez une commande slash en tant qu’administrateur."
-        >
+        <PageHeader title={t("emptyPageTitle")} description={t("emptyPageDesc")} />
+        <SectionCard title={t("connectTitle")} subtitle={t("connectSubtitle")}>
           <DiscordInviteCta
             inviteUrl={discordInviteUrl}
             installRedirectUri={discordInstallRedirectUri}
@@ -169,18 +288,18 @@ export function EventsWizard({
 
   return (
     <div className="dashboard-main">
-        <PageHeader
-          title="Lancer une bataille"
-          description="Quatre étapes simples : modèle, salon, horaire, confirmation."
-          actions={
-            <Link href="/dashboard/templates" className="btn btn-ghost">
-              ← Modèles
-            </Link>
-          }
-        />
+      <PageHeader
+        title={t("pageTitle")}
+        description={t("pageDesc")}
+        actions={
+          <Link href="/dashboard/templates" className="btn btn-ghost">
+            ← {t("backTemplates")}
+          </Link>
+        }
+      />
 
-      <nav className="wizard-steps" aria-label="Progression">
-        {STEPS.map((label, i) => (
+      <nav className="wizard-steps" aria-label={t("stepsAria")}>
+        {steps.map((label, i) => (
           <button
             key={label}
             type="button"
@@ -199,26 +318,26 @@ export function EventsWizard({
 
         {step === 0 && (
           <div className="wizard-step-body">
-            <h2 className="wizard-step-title">Quel modèle utiliser ?</h2>
-            <p className="field-hint">
-              Le modèle définit la timeline des messages dans le salon Discord.
-            </p>
+            <h2 className="wizard-step-title">{t("pickTemplateTitle")}</h2>
+            <p className="field-hint">{t("pickTemplateHint")}</p>
             <div className="template-pick-grid">
-              {templates.map((t) => {
-                const m = templatesMeta[t.id];
+              {templates.map((tmpl) => {
+                const m = templatesMeta[tmpl.id];
                 return (
                   <button
-                    key={t.id}
+                    key={tmpl.id}
                     type="button"
-                    className={`template-pick-card ${templateId === t.id ? "template-pick-card--selected" : ""}`}
-                    onClick={() => setTemplateId(t.id)}
+                    className={`template-pick-card ${templateId === tmpl.id ? "template-pick-card--selected" : ""}`}
+                    onClick={() => setTemplateId(tmpl.id)}
                   >
-                    <span className="template-pick-card__name">{t.name}</span>
+                    <span className="template-pick-card__name">{tmpl.name}</span>
                     {m ? (
                       <span className="template-pick-card__meta">
-                        {m.phaseCount} annonce{m.phaseCount !== 1 ? "s" : ""} sur ~{" "}
-                        {formatDurationHuman(m.durationSec)} · bataille{" "}
-                        {m.eventDurationMinutes} min
+                        {t("announcementsLine", {
+                          count: m.phaseCount,
+                          duration: formatDurationHuman(m.durationSec, locale),
+                          minutes: m.eventDurationMinutes,
+                        })}
                       </span>
                     ) : null}
                   </button>
@@ -233,7 +352,7 @@ export function EventsWizard({
                 disabled={!canNext0}
                 onClick={() => setStep(1)}
               >
-                Continuer
+                {t("continue")}
               </button>
             </div>
           </div>
@@ -241,15 +360,10 @@ export function EventsWizard({
 
         {step === 1 && (
           <div className="wizard-step-body">
-            <h2 className="wizard-step-title">Où publier sur Discord ?</h2>
-            <p className="field-hint">
-              Choisis le salon texte où les joueurs verront les annonces.
-            </p>
+            <h2 className="wizard-step-title">{t("pickChannelTitle")}</h2>
+            <p className="field-hint">{t("pickChannelHint")}</p>
             {!discordConfigured ? (
-              <p className="form-error">
-                Impossible de charger la liste des salons : vérifiez la
-                configuration Discord côté administration.
-              </p>
+              <p className="form-error">{t("discordListError")}</p>
             ) : (
               <div className="channel-pick-grid">
                 {channels.map((c) => (
@@ -273,7 +387,7 @@ export function EventsWizard({
                 className="btn btn-ghost"
                 onClick={() => setStep(0)}
               >
-                Retour
+                {t("back")}
               </button>
               <button
                 type="button"
@@ -281,7 +395,7 @@ export function EventsWizard({
                 disabled={!canNext1}
                 onClick={() => setStep(2)}
               >
-                Continuer
+                {t("continue")}
               </button>
             </div>
           </div>
@@ -289,40 +403,55 @@ export function EventsWizard({
 
         {step === 2 && (
           <div className="wizard-step-body">
-            <h2 className="wizard-step-title">Quand démarrer ?</h2>
-            <div className="timing-options">
-              <label
-                className={`timing-card ${launchNow ? "timing-card--selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="when"
-                  checked={launchNow}
-                  onChange={() => setLaunchNow(true)}
-                />
-                <span className="timing-card__title">Tout de suite</span>
-                <span className="timing-card__desc">
-                  Le bot lancera dès que possible (quelques secondes).
-                </span>
-              </label>
-              <label
-                className={`timing-card ${!launchNow ? "timing-card--selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="when"
-                  checked={!launchNow}
-                  onChange={() => setLaunchNow(false)}
-                />
-                <span className="timing-card__title">Planifier</span>
-                <span className="timing-card__desc">
-                  Choisis une date et heure précises.
-                </span>
-              </label>
+            <h2 className="wizard-step-title">{t("whenTitle")}</h2>
+            <div
+              className={`timing-options ${legionTimelinesNeedSchedule ? "timing-options--single" : ""}`}
+            >
+              {!legionTimelinesNeedSchedule ? (
+                <>
+                  <label
+                    className={`timing-card ${launchNow ? "timing-card--selected" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="when"
+                      checked={launchNow}
+                      onChange={() => setLaunchNow(true)}
+                    />
+                    <span className="timing-card__title">{t("nowTitle")}</span>
+                    <span className="timing-card__desc">{t("nowDesc")}</span>
+                  </label>
+                  <label
+                    className={`timing-card ${!launchNow ? "timing-card--selected" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      name="when"
+                      checked={!launchNow}
+                      onChange={() => setLaunchNow(false)}
+                    />
+                    <span className="timing-card__title">
+                      {t("scheduleTitle")}
+                    </span>
+                    <span className="timing-card__desc">
+                      {t("scheduleDesc")}
+                    </span>
+                  </label>
+                </>
+              ) : (
+                <div className="timing-card timing-card--selected timing-card--locked">
+                  <span className="timing-card__title">
+                    {t("scheduleTitle")}
+                  </span>
+                  <span className="timing-card__desc">
+                    {t("scheduleDescDualLegion")}
+                  </span>
+                </div>
+              )}
             </div>
-            {!launchNow ? (
+            {!launchNow && !legionTimelinesNeedSchedule ? (
               <div className="form-field" style={{ marginTop: "1rem" }}>
-                <label htmlFor="sched">Date et heure</label>
+                <label htmlFor="sched">{t("datetimeLabel")}</label>
                 <input
                   id="sched"
                   type="datetime-local"
@@ -331,13 +460,47 @@ export function EventsWizard({
                 />
               </div>
             ) : null}
+            {meta?.hasLegionPhases ? (
+              <div
+                className="events-wizard-legion-offsets"
+                style={{ marginTop: "1.25rem" }}
+              >
+                <p style={{ fontWeight: 600, margin: "0 0 0.35rem" }}>
+                  {t("legionStartsSectionTitle")}
+                </p>
+                <p className="field-hint" style={{ marginBottom: "1rem" }}>
+                  {t("legionStartsHint")}
+                </p>
+                <div className="events-wizard-legion-offsets-grid">
+                  <UtcLegionDatetimeField
+                    id="ev-legion1-utc"
+                    groupLabel={t("legion1StartUtcLabel")}
+                    dateLabel={t("legionUtcDateLabel")}
+                    timeLabel={t("legionUtcTimeLabel")}
+                    value={legion1StartsAtUtc}
+                    onChange={setLegion1StartsAtUtc}
+                  />
+                  <UtcLegionDatetimeField
+                    id="ev-legion2-utc"
+                    groupLabel={t("legion2StartUtcLabel")}
+                    dateLabel={t("legionUtcDateLabel")}
+                    timeLabel={t("legionUtcTimeLabel")}
+                    value={legion2StartsAtUtc}
+                    onChange={setLegion2StartsAtUtc}
+                  />
+                </div>
+                <p className="field-hint" style={{ marginTop: "0.5rem" }}>
+                  {t("legionUtcFormatHint")}
+                </p>
+              </div>
+            ) : null}
             <div className="wizard-nav">
               <button
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => setStep(1)}
               >
-                Retour
+                {t("back")}
               </button>
               <button
                 type="button"
@@ -345,7 +508,7 @@ export function EventsWizard({
                 disabled={!canNext2}
                 onClick={() => setStep(3)}
               >
-                Continuer
+                {t("continue")}
               </button>
             </div>
           </div>
@@ -353,12 +516,12 @@ export function EventsWizard({
 
         {step === 3 && (
           <div className="wizard-step-body">
-            <h2 className="wizard-step-title">Récapitulatif</h2>
+            <h2 className="wizard-step-title">{t("reviewTitle")}</h2>
             <div className="review-card">
               <dl className="review-dl">
-                <dt>Modèle</dt>
-                <dd>{templates.find((t) => t.id === templateId)?.name}</dd>
-                <dt>Salon Discord</dt>
+                <dt>{t("dtTemplate")}</dt>
+                <dd>{templates.find((x) => x.id === templateId)?.name}</dd>
+                <dt>{t("dtChannel")}</dt>
                 <dd>
                   {channelNameSnapshot ? (
                     <strong>#{channelNameSnapshot}</strong>
@@ -366,26 +529,91 @@ export function EventsWizard({
                     "—"
                   )}
                 </dd>
-                <dt>Démarrage</dt>
+                <dt>{t("dtStart")}</dt>
                 <dd>
-                  {launchNow
-                    ? "Immédiat"
-                    : scheduledAt
-                      ? new Date(scheduledAt).toLocaleString()
-                      : "—"}
+                  {launchNow ? (
+                    t("immediate")
+                  ) : legionTimelinesNeedSchedule ? (
+                    (() => {
+                      const a = parseUtcDatetimeInputToDate(legion1StartsAtUtc);
+                      const b = parseUtcDatetimeInputToDate(legion2StartsAtUtc);
+                      if (!a || !b) return "—";
+                      const earliest = new Date(
+                        Math.min(a.getTime(), b.getTime()),
+                      );
+                      return (
+                        <>
+                          {earliest.toLocaleString(locale)}
+                          <span
+                            className="muted"
+                            style={{
+                              display: "block",
+                              fontSize: "0.88em",
+                              marginTop: "0.3rem",
+                            }}
+                          >
+                            {t("dtStartDualLegionNote")}
+                          </span>
+                        </>
+                      );
+                    })()
+                  ) : scheduledAt ? (
+                    new Date(scheduledAt).toLocaleString(locale)
+                  ) : (
+                    "—"
+                  )}
                 </dd>
+                {meta?.hasLegionPhases ? (
+                  <>
+                    <dt>{t("dtLegion1StartUtc")}</dt>
+                    <dd>
+                      <strong>
+                        {(() => {
+                          const d = parseUtcDatetimeInputToDate(
+                            legion1StartsAtUtc,
+                          );
+                          return d
+                            ? `${d.toLocaleString(locale, {
+                                timeZone: "UTC",
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })} UTC`
+                            : "—";
+                        })()}
+                      </strong>
+                    </dd>
+                    <dt>{t("dtLegion2StartUtc")}</dt>
+                    <dd>
+                      <strong>
+                        {(() => {
+                          const d = parseUtcDatetimeInputToDate(
+                            legion2StartsAtUtc,
+                          );
+                          return d
+                            ? `${d.toLocaleString(locale, {
+                                timeZone: "UTC",
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })} UTC`
+                            : "—";
+                        })()}
+                      </strong>
+                    </dd>
+                  </>
+                ) : null}
                 {meta ? (
                   <>
-                    <dt>Durée sur le terrain</dt>
+                    <dt>{t("dtTerrain")}</dt>
                     <dd>
-                      <strong>{meta.eventDurationMinutes} min</strong> (selon le
-                      modèle)
+                      <strong>{meta.eventDurationMinutes} min</strong>{" "}
+                      {t("dtTerrainModel")}
                     </dd>
-                    <dt>Annonces Discord</dt>
+                    <dt>{t("dtAnnounce")}</dt>
                     <dd>
-                      {meta.phaseCount} étape
-                      {meta.phaseCount !== 1 ? "s" : ""}, étalées sur ~{" "}
-                      {formatDurationHuman(meta.durationSec)} après le départ
+                      {t("announceSpread", {
+                        count: meta.phaseCount,
+                        duration: formatDurationHuman(meta.durationSec, locale),
+                      })}
                     </dd>
                   </>
                 ) : null}
@@ -394,7 +622,7 @@ export function EventsWizard({
             {phasePreview.length > 0 ? (
               <div>
                 <p className="field-hint" style={{ marginBottom: 0 }}>
-                  Aperçu des prochaines annonces :
+                  {t("previewHint")}
                 </p>
                 <ul className="wizard-phase-preview">
                   {phasePreview.map((row, i) => (
@@ -403,20 +631,19 @@ export function EventsWizard({
                         {row.offsetLabel}
                       </span>
                       <span className="wizard-phase-preview__type">
-                        {row.typeLabel}
+                        {phaseTypeLabel(row.phaseType)}
                       </span>
                       <span className="wizard-phase-preview__title">
-                        {row.title}
+                        {row.title.trim() ? row.title : t("untitledPhase")}
                       </span>
                     </li>
                   ))}
                 </ul>
                 {meta && meta.phaseCount > phasePreview.length ? (
                   <p className="wizard-phase-preview__more">
-                    + {meta.phaseCount - phasePreview.length} autre
-                    {meta.phaseCount - phasePreview.length !== 1 ? "s" : ""}{" "}
-                    étape
-                    {meta.phaseCount - phasePreview.length !== 1 ? "s" : ""}
+                    {t("morePhases", {
+                      count: meta.phaseCount - phasePreview.length,
+                    })}
                   </p>
                 ) : null}
               </div>
@@ -427,33 +654,43 @@ export function EventsWizard({
                 className="btn btn-ghost"
                 onClick={() => setStep(2)}
               >
-                Retour
+                {t("back")}
               </button>
               <div className="btn-row">
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className={
+                    legionTimelinesNeedSchedule
+                      ? "btn btn-primary"
+                      : "btn btn-secondary"
+                  }
                   disabled={
-                    pending || launchNow || !scheduledAt.trim()
+                    pending ||
+                    launchNow ||
+                    (!legionTimelinesNeedSchedule && !scheduledAt.trim())
                   }
                   onClick={() => submit("schedule")}
                 >
-                  Planifier l’événement
+                  {t("scheduleBtn")}
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={pending || !launchNow}
-                  onClick={() => submit("now")}
-                >
-                  Lancer maintenant
-                </button>
+                {!legionTimelinesNeedSchedule ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={pending || !launchNow}
+                    onClick={() => submit("now")}
+                  >
+                    {t("launchNowBtn")}
+                  </button>
+                ) : null}
               </div>
             </div>
             <p className="field-hint wizard-final-hint">
-              {launchNow
-                ? "« Lancer maintenant » : le bot prend la main dans les secondes."
-                : "« Planifier l’événement » : départ à l’heure choisie."}
+              {legionTimelinesNeedSchedule
+                ? t("finalHintSchedule")
+                : launchNow
+                  ? t("finalHintNow")
+                  : t("finalHintSchedule")}
             </p>
           </div>
         )}

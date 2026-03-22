@@ -79,6 +79,8 @@ export type RosterPreviewState =
         swordlandShowdownPreset: boolean;
         battleArchetype: BattleArchetype;
         eventPresetId: string;
+        legion1StartOffsetMinutes: number;
+        legion2StartOffsetMinutes: number;
       };
       battleArchetype: BattleArchetype;
       tacticalPlan: TacticalWarPlan;
@@ -105,6 +107,14 @@ function mergedRosterTextFromForm(formData: FormData): string {
 function parseEventPresetId(raw: string): string {
   const t = String(raw ?? "").trim();
   return t || "swordland_showdown";
+}
+
+function parseLegionStartOffsetMinutes(
+  raw: FormDataEntryValue | null,
+): number {
+  const n = Number.parseInt(String(raw ?? "0"), 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, 24 * 60);
 }
 
 function runGeneration(
@@ -236,6 +246,12 @@ export async function previewRosterTemplateAction(
   }
   const battleArchetype = presetMeta.battleArchetype;
   const swordlandShowdownPreset = presetMeta.id === "swordland_showdown";
+  const legion1StartOffsetMinutes = parseLegionStartOffsetMinutes(
+    formData.get("legion1StartOffsetMinutes"),
+  );
+  const legion2StartOffsetMinutes = parseLegionStartOffsetMinutes(
+    formData.get("legion2StartOffsetMinutes"),
+  );
 
   if (!guildId || !name) {
     return { ok: false, error: "Guilde et nom du modèle sont requis." };
@@ -292,6 +308,8 @@ export async function previewRosterTemplateAction(
         swordlandShowdownPreset,
         battleArchetype,
         eventPresetId,
+        legion1StartOffsetMinutes,
+        legion2StartOffsetMinutes,
       },
     };
   } catch (e) {
@@ -322,6 +340,12 @@ export async function createTemplateFromRosterAction(formData: FormData) {
   }
   const battleArchetype = presetMeta.battleArchetype;
   const swordlandShowdownPreset = presetMeta.id === "swordland_showdown";
+  const legion1StartOffsetMinutes = parseLegionStartOffsetMinutes(
+    formData.get("legion1StartOffsetMinutes"),
+  );
+  const legion2StartOffsetMinutes = parseLegionStartOffsetMinutes(
+    formData.get("legion2StartOffsetMinutes"),
+  );
 
   if (!guildId || !name) {
     redirect(
@@ -369,6 +393,8 @@ export async function createTemplateFromRosterAction(formData: FormData) {
         name,
         description: desc,
         eventDurationMinutes,
+        legion1StartOffsetMinutes,
+        legion2StartOffsetMinutes,
         creationSource: TemplateCreationSource.ROSTER_GENERATED,
         eventProductKey,
       },

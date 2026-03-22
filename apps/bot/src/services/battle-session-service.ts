@@ -4,9 +4,17 @@ import {
   ManagedEventStatus,
   Prisma,
   ReminderStatus,
+  type TimelineScope,
 } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
-import { prepareTemplateEventsForSession } from "../domain/battle-rules.js";
+import {
+  allianceClockOffsetSeconds,
+  assertIntegerNonNegativeOffsets,
+  assertPhaseHasDisplayableContent,
+  isDiscordTimelineScope,
+  legionPhaseTitlePrefix,
+  type LegionAnchorTemplate,
+} from "../domain/battle-rules.js";
 import { log } from "../util/log.js";
 import type { ReminderScheduler } from "./reminder-scheduling-service.js";
 
@@ -101,9 +109,40 @@ export async function createBattleSessionWithReminders(params: {
     objective?: string;
     action?: string;
     nextHint?: string;
+    timelineScope: TimelineScope;
   }>;
+  legionAnchor: LegionAnchorTemplate;
 }): Promise<CreatedReminderSchedule[]> {
-  const events = prepareTemplateEventsForSession(params.events);
+  const prepared = params.events
+    .filter((e) => isDiscordTimelineScope(e.timelineScope))
+    .map((e) => {
+      const allianceOffsetSeconds = allianceClockOffsetSeconds(
+        e.offsetSeconds,
+        e.timelineScope,
+        params.legionAnchor,
+      );
+      const prefix = legionPhaseTitlePrefix(e.timelineScope);
+      return {
+        id: e.id,
+        orderIndex: e.orderIndex,
+        phaseType: e.phaseType,
+        title: `${prefix}${e.title}`,
+        objective: e.objective ?? "",
+        action: e.action ?? "",
+        nextHint: e.nextHint ?? "",
+        allianceOffsetSeconds,
+      };
+    });
+  assertIntegerNonNegativeOffsets(
+    prepared.map((e) => ({ offsetSeconds: e.allianceOffsetSeconds })),
+  );
+  assertPhaseHasDisplayableContent(prepared);
+  const events = [...prepared].sort((a, b) => {
+    if (a.allianceOffsetSeconds !== b.allianceOffsetSeconds) {
+      return a.allianceOffsetSeconds - b.allianceOffsetSeconds;
+    }
+    return (a.orderIndex ?? 0) - (b.orderIndex ?? 0);
+  });
   const startedAt = new Date();
 
   return prisma.$transaction(async (tx) => {
@@ -131,7 +170,7 @@ export async function createBattleSessionWithReminders(params: {
 
     for (const ev of events) {
       const scheduledAt = new Date(
-        startedAt.getTime() + ev.offsetSeconds * 1000,
+        startedAt.getTime() + ev.allianceOffsetSeconds * 1000,
       );
       const reminder = await tx.battleReminder.create({
         data: {

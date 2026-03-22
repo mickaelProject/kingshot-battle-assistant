@@ -130,10 +130,19 @@ export function startHttpControlServer(scheduler: ReminderScheduler): void {
         json(res, 400, { ok: false, error: result.error });
       }
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       log.warn("control", "handler error", {
-        message: e instanceof Error ? e.message : String(e),
+        message,
+        stack: e instanceof Error ? e.stack : undefined,
       });
-      json(res, 500, { ok: false, error: "Internal error." });
+      const safe = message.replace(/[\r\n]+/g, " ").slice(0, 280);
+      json(res, 500, {
+        ok: false,
+        error:
+          safe.length > 0
+            ? `Erreur serveur bot · ${safe}`
+            : "Internal error.",
+      });
     }
   });
 

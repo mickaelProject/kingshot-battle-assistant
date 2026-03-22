@@ -1,25 +1,20 @@
+import { getLocale } from "next-intl/server";
 import {
   fetchGuildTextChannelOptionsByGuildId,
   hasDiscordBotToken,
 } from "@/lib/discord-rest";
 import { fetchBattleTemplatesForEventsWizard } from "@/lib/battle-templates-queries";
-import { prisma } from "@/lib/prisma";
+import type { AppLocale } from "@/i18n/config";
 import {
   getDiscordBotInviteUrl,
   getDiscordInstallRedirectUri,
 } from "@/lib/discord-invite";
+import { prisma } from "@/lib/prisma";
 import {
   formatOffsetLabel,
   templateDurationSeconds,
 } from "@/lib/time-human";
 import { EventsWizard } from "./events-wizard";
-
-const PHASE_TYPE_FR: Record<string, string> = {
-  START: "Début",
-  OBJECTIVE: "Objectif",
-  REMINDER: "Rappel",
-  FINAL: "Clôture",
-};
 
 export default async function EventsPage({
   searchParams,
@@ -31,18 +26,22 @@ export default async function EventsPage({
   }>;
 }) {
   const sp = await searchParams;
+  const locale = (await getLocale()) as AppLocale;
   const discordInviteUrl = getDiscordBotInviteUrl();
   const discordInstallRedirectUri = getDiscordInstallRedirectUri();
-  const [guilds, templates] = await Promise.all([
-    prisma.guildSettings.findMany({
-      orderBy: { discordGuildId: "asc" },
-      select: {
-        id: true,
-        discordGuildId: true,
-        battleChannelId: true,
-      },
-    }),
-    fetchBattleTemplatesForEventsWizard(),
+  const guildsPromise = prisma.guildSettings.findMany({
+    orderBy: { discordGuildId: "asc" },
+    select: {
+      id: true,
+      discordGuildId: true,
+      battleChannelId: true,
+    },
+  });
+  const templatesPromise = fetchBattleTemplatesForEventsWizard();
+  const guilds = await guildsPromise;
+  const [templates, channelMap] = await Promise.all([
+    templatesPromise,
+    fetchGuildTextChannelOptionsByGuildId(guilds),
   ]);
 
   const templatesMeta: Record<
@@ -51,29 +50,52 @@ export default async function EventsPage({
       phaseCount: number;
       durationSec: number;
       eventDurationMinutes: number;
+      hasLegionPhases: boolean;
+      legionTimelinesNeedSchedule: boolean;
+      legion1StartOffsetMinutes: number;
+      legion2StartOffsetMinutes: number;
     }
   > = {};
   const templatesPhasePreview: Record<
     string,
-    { offsetLabel: string; typeLabel: string; title: string }[]
+    { offsetLabel: string; phaseType: string; title: string }[]
   > = {};
 
   const templatesLite = templates.map((t) => {
-    const offs = t.events.map((e) => e.offsetSeconds);
+    const discordPhases = t.events.filter((e) => e.timelineScope === "GLOBAL");
+    const phasesForStats =
+      discordPhases.length > 0 ? discordPhases : t.events;
+    const offs = phasesForStats.map((e) => e.offsetSeconds);
+    const hasLegionPhases = t.events.some(
+      (e) =>
+        e.timelineScope === "LEGION_1" || e.timelineScope === "LEGION_2",
+    );
+    const hasLegion1Timeline = t.events.some(
+      (e) => e.timelineScope === "LEGION_1",
+    );
+    const hasLegion2Timeline = t.events.some(
+      (e) => e.timelineScope === "LEGION_2",
+    );
+    /** Deux timelines légion distinctes → départ alliance explicite (pas « tout de suite »). */
+    const legionTimelinesNeedSchedule =
+      hasLegion1Timeline && hasLegion2Timeline;
     templatesMeta[t.id] = {
-      phaseCount: t.events.length,
+      phaseCount: phasesForStats.length,
       durationSec: templateDurationSeconds(offs),
       eventDurationMinutes: t.eventDurationMinutes,
+      hasLegionPhases,
+      legionTimelinesNeedSchedule,
+      legion1StartOffsetMinutes: t.legion1StartOffsetMinutes,
+      legion2StartOffsetMinutes: t.legion2StartOffsetMinutes,
     };
-    templatesPhasePreview[t.id] = t.events.slice(0, 8).map((e) => ({
-      offsetLabel: formatOffsetLabel(e.offsetSeconds),
-      typeLabel: PHASE_TYPE_FR[e.phaseType] ?? e.phaseType,
-      title: e.title?.trim() || "Sans titre",
+    templatesPhasePreview[t.id] = phasesForStats.slice(0, 8).map((e) => ({
+      offsetLabel: formatOffsetLabel(e.offsetSeconds, locale),
+      phaseType: e.phaseType,
+      title: e.title?.trim() ?? "",
     }));
     return { id: t.id, name: t.name, guildId: t.guildId };
   });
 
-  const channelMap = await fetchGuildTextChannelOptionsByGuildId(guilds);
   const channelsByGuildId: Record<string, { id: string; name: string }[]> =
     Object.fromEntries(channelMap);
 

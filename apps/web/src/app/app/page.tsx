@@ -12,7 +12,7 @@ export default function ClientAppHomePage() {
       <p className="muted live-war--landing__hint">
         Exemple :{" "}
         <code className="roster-code-hint">
-          /app/live?run=…&amp;me=VOTRE_ID_DISCORD
+          /live/VOTRE_RUN_ID?me=VOTRE_ID_DISCORD
         </code>
         <br />
         <span className="live-war--landing__sub">

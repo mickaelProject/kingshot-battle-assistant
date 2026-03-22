@@ -5,7 +5,7 @@ import {
   createBattleSessionWithReminders,
 } from "./battle-session-service.js";
 import { prisma } from "../db/prisma.js";
-import { sortTemplateEventsByOffset } from "../domain/battle-rules.js";
+import { isDiscordTimelineScope } from "../domain/battle-rules.js";
 
 const battleEventOrderBy: Prisma.BattleEventDefinitionOrderByWithRelationInput[] =
   [{ offsetSeconds: "asc" }, { orderIndex: "asc" }];
@@ -40,11 +40,10 @@ export async function startBattleForGuild(params: {
     return { ok: false, reason: "GUILD_MISMATCH" };
   }
 
-  const discordEvents = template.events.filter(
-    (e) => e.timelineScope === "GLOBAL",
+  const discordEvents = template.events.filter((e) =>
+    isDiscordTimelineScope(e.timelineScope),
   );
-  const events = sortTemplateEventsByOffset(discordEvents);
-  if (events.length === 0) {
+  if (discordEvents.length === 0) {
     return { ok: false, reason: "NO_PHASES" };
   }
 
@@ -54,7 +53,11 @@ export async function startBattleForGuild(params: {
       templateId: template.id,
       channelId: params.channelId,
       starterUserId: params.starterUserId,
-      events: events.map((e) => ({
+      legionAnchor: {
+        legion1StartOffsetMinutes: template.legion1StartOffsetMinutes ?? 0,
+        legion2StartOffsetMinutes: template.legion2StartOffsetMinutes ?? 0,
+      },
+      events: discordEvents.map((e) => ({
         id: e.id,
         offsetSeconds: e.offsetSeconds,
         orderIndex: e.orderIndex,
@@ -63,6 +66,7 @@ export async function startBattleForGuild(params: {
         objective: e.objective,
         action: e.action,
         nextHint: e.nextHint,
+        timelineScope: e.timelineScope,
       })),
     });
 

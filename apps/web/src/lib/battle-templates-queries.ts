@@ -1,6 +1,7 @@
 import {
   type BattlePhaseType,
   TemplateCreationSource,
+  type TimelineScope,
   Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -9,6 +10,11 @@ import { prisma } from "@/lib/prisma";
  * Si la migration `20260322140000_template_event_duration` n’a pas été appliquée,
  * PostgreSQL renvoie P2022 sur `eventDurationMinutes`. On retombe sur 60 min par défaut.
  */
+function p2022Blob(e: unknown): string {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError)) return "";
+  return `${e.message}${JSON.stringify(e.meta ?? {})}`;
+}
+
 function isMissingEventDurationColumn(e: unknown): boolean {
   return (
     e instanceof Prisma.PrismaClientKnownRequestError &&
@@ -19,9 +25,12 @@ function isMissingEventDurationColumn(e: unknown): boolean {
   );
 }
 
-function p2022Blob(e: unknown): string {
-  if (!(e instanceof Prisma.PrismaClientKnownRequestError)) return "";
-  return `${e.message}${JSON.stringify(e.meta ?? {})}`;
+function isMissingTemplateLegionOffsetColumns(e: unknown): boolean {
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError &&
+    e.code === "P2022" &&
+    /legion1StartOffsetMinutes|BattleTemplate/i.test(p2022Blob(e))
+  );
 }
 
 /** Mutable pour compatibilité avec les types `orderBy` Prisma (pas `readonly[]`). */
@@ -31,54 +40,82 @@ const eventsOrderPhases: Prisma.BattleEventDefinitionOrderByWithRelationInput[] 
   { orderIndex: "asc" },
 ];
 
-const eventsForWizard = {
-  orderBy: { offsetSeconds: "asc" as const },
+const eventsSelectForWizard: Prisma.BattleTemplate$eventsArgs = {
+  orderBy: [
+    { offsetSeconds: "asc" },
+    { orderIndex: "asc" },
+  ],
   select: {
     offsetSeconds: true,
     title: true,
     phaseType: true,
+    timelineScope: true,
   },
-} as const;
+};
 
 export type TemplateRowForEventsWizard = {
   id: string;
   name: string;
   guildId: string;
   eventDurationMinutes: number;
+  legion1StartOffsetMinutes: number;
+  legion2StartOffsetMinutes: number;
   events: {
     offsetSeconds: number;
     title: string;
     phaseType: BattlePhaseType;
+    timelineScope: TimelineScope;
   }[];
 };
 
 export async function fetchBattleTemplatesForEventsWizard(): Promise<
   TemplateRowForEventsWizard[]
 > {
-  try {
-    return await prisma.battleTemplate.findMany({
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        guildId: true,
-        eventDurationMinutes: true,
-        events: eventsForWizard,
-      },
-    });
-  } catch (e) {
-    if (!isMissingEventDurationColumn(e)) throw e;
-    const rows = await prisma.battleTemplate.findMany({
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        guildId: true,
-        events: eventsForWizard,
-      },
-    });
-    return rows.map((r) => ({ ...r, eventDurationMinutes: 60 }));
+  let templateLegionOffsets = true;
+  let templateEventDuration = true;
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const rows = await prisma.battleTemplate.findMany({
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          guildId: true,
+          ...(templateEventDuration ? { eventDurationMinutes: true } : {}),
+          ...(templateLegionOffsets
+            ? {
+                legion1StartOffsetMinutes: true,
+                legion2StartOffsetMinutes: true,
+              }
+            : {}),
+          events: eventsSelectForWizard,
+        },
+      });
+      return rows.map((r) => ({
+        ...r,
+        eventDurationMinutes: r.eventDurationMinutes ?? 60,
+        legion1StartOffsetMinutes: r.legion1StartOffsetMinutes ?? 0,
+        legion2StartOffsetMinutes: r.legion2StartOffsetMinutes ?? 0,
+        events: r.events,
+      }));
+    } catch (e) {
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError)) throw e;
+      if (e.code !== "P2022") throw e;
+      if (isMissingTemplateLegionOffsetColumns(e)) {
+        templateLegionOffsets = false;
+        continue;
+      }
+      if (isMissingEventDurationColumn(e)) {
+        templateEventDuration = false;
+        continue;
+      }
+      throw e;
+    }
   }
+  throw new Error(
+    "[kingshot] Impossible de charger les modèles pour le lancement : schéma base incompatible.",
+  );
 }
 
 export type TemplateRowForTemplatesPage = {
@@ -179,19 +216,93 @@ const selectTemplateForEditBase = {
   events: { orderBy: eventsOrderPhases },
 } as const;
 
+function isMissingLegionOffsetColumns(e: unknown): boolean {
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError &&
+    e.code === "P2022" &&
+    /legion[12]StartOffsetMinutes/i.test(p2022Blob(e))
+  );
+}
+
 export async function fetchBattleTemplateForEdit(id: string) {
   try {
     return await prisma.battleTemplate.findUnique({
       where: { id },
-      select: { ...selectTemplateForEditBase, eventDurationMinutes: true },
+      select: {
+        ...selectTemplateForEditBase,
+        eventDurationMinutes: true,
+        legion1StartOffsetMinutes: true,
+        legion2StartOffsetMinutes: true,
+      },
     });
   } catch (e) {
-    if (!isMissingEventDurationColumn(e)) throw e;
-    const t = await prisma.battleTemplate.findUnique({
-      where: { id },
-      select: selectTemplateForEditBase,
-    });
-    return t ? { ...t, eventDurationMinutes: 60 } : null;
+    if (isMissingEventDurationColumn(e)) {
+      try {
+        const t = await prisma.battleTemplate.findUnique({
+          where: { id },
+          select: {
+            ...selectTemplateForEditBase,
+            legion1StartOffsetMinutes: true,
+            legion2StartOffsetMinutes: true,
+          },
+        });
+        return t
+          ? {
+              ...t,
+              eventDurationMinutes: 60,
+            }
+          : null;
+      } catch (e2) {
+        if (isMissingLegionOffsetColumns(e2)) {
+          const t = await prisma.battleTemplate.findUnique({
+            where: { id },
+            select: selectTemplateForEditBase,
+          });
+          return t
+            ? {
+                ...t,
+                eventDurationMinutes: 60,
+                legion1StartOffsetMinutes: 0,
+                legion2StartOffsetMinutes: 0,
+              }
+            : null;
+        }
+        throw e2;
+      }
+    }
+    if (isMissingLegionOffsetColumns(e)) {
+      try {
+        const t = await prisma.battleTemplate.findUnique({
+          where: { id },
+          select: {
+            ...selectTemplateForEditBase,
+            eventDurationMinutes: true,
+          },
+        });
+        return t
+          ? {
+              ...t,
+              legion1StartOffsetMinutes: 0,
+              legion2StartOffsetMinutes: 0,
+            }
+          : null;
+      } catch (e2) {
+        if (!isMissingEventDurationColumn(e2)) throw e2;
+        const t = await prisma.battleTemplate.findUnique({
+          where: { id },
+          select: selectTemplateForEditBase,
+        });
+        return t
+          ? {
+              ...t,
+              eventDurationMinutes: 60,
+              legion1StartOffsetMinutes: 0,
+              legion2StartOffsetMinutes: 0,
+            }
+          : null;
+      }
+    }
+    throw e;
   }
 }
 
@@ -236,14 +347,58 @@ export async function fetchBattleTemplateForDuplicate(id: string) {
   try {
     return await prisma.battleTemplate.findUnique({
       where: { id },
-      select: { ...selectTemplateForDuplicateBase, eventDurationMinutes: true },
+      select: {
+        ...selectTemplateForDuplicateBase,
+        eventDurationMinutes: true,
+        legion1StartOffsetMinutes: true,
+        legion2StartOffsetMinutes: true,
+      },
     });
   } catch (e) {
-    if (!isMissingEventDurationColumn(e)) throw e;
-    const t = await prisma.battleTemplate.findUnique({
-      where: { id },
-      select: selectTemplateForDuplicateBase,
-    });
-    return t ? { ...t, eventDurationMinutes: 60 } : null;
+    if (isMissingEventDurationColumn(e)) {
+      try {
+        const t = await prisma.battleTemplate.findUnique({
+          where: { id },
+          select: {
+            ...selectTemplateForDuplicateBase,
+            legion1StartOffsetMinutes: true,
+            legion2StartOffsetMinutes: true,
+          },
+        });
+        return t
+          ? { ...t, eventDurationMinutes: 60 }
+          : null;
+      } catch (e2) {
+        if (isMissingLegionOffsetColumns(e2)) {
+          const t = await prisma.battleTemplate.findUnique({
+            where: { id },
+            select: selectTemplateForDuplicateBase,
+          });
+          return t
+            ? {
+                ...t,
+                eventDurationMinutes: 60,
+                legion1StartOffsetMinutes: 0,
+                legion2StartOffsetMinutes: 0,
+              }
+            : null;
+        }
+        throw e2;
+      }
+    }
+    if (isMissingLegionOffsetColumns(e)) {
+      const t = await prisma.battleTemplate.findUnique({
+        where: { id },
+        select: { ...selectTemplateForDuplicateBase, eventDurationMinutes: true },
+      });
+      return t
+        ? {
+            ...t,
+            legion1StartOffsetMinutes: 0,
+            legion2StartOffsetMinutes: 0,
+          }
+        : null;
+    }
+    throw e;
   }
 }

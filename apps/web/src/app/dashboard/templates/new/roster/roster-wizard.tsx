@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useLocale } from "next-intl";
 import type { CSSProperties } from "react";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import {
   createTemplateFromRosterAction,
   previewRosterTemplateAction,
   type RosterPreviewState,
 } from "@/actions/roster-template";
 import { RosterDraftTimeline } from "@/components/roster-draft-timeline";
+import { RosterEditor } from "@/components/roster-editor";
 import { TacticalOrbatPanel } from "@/components/tactical-orbat-panel";
 import { SectionCard } from "@/components/ui/section-card";
 import { TacticalPhasePreview } from "@/components/tactical-phase-preview";
@@ -20,9 +22,9 @@ import {
 } from "@/lib/event-type-registry";
 import { fmtPowerShort } from "@/lib/roster-generation.service";
 import { parseRosterLines } from "@/lib/roster-template/parse-roster";
+import type { AppLocale } from "@/i18n/config";
 import {
   BATTLE_ARCHETYPE_OPTIONS,
-  bucketPlayers104050,
   mergeLegionPlayersUnique,
 } from "@/lib/tactical-war-plan";
 import { formatOffsetLabel } from "@/lib/time-human";
@@ -63,6 +65,8 @@ function buildWizardFormData(opts: {
   fd.set("playStyle", "balanced");
   fd.set("eventDurationMinutes", String(opts.eventDurationMinutes));
   fd.set("eventPresetId", opts.eventPresetId);
+  fd.set("legion1StartOffsetMinutes", "0");
+  fd.set("legion2StartOffsetMinutes", "0");
   const preset = getEventPresetById(opts.eventPresetId);
   fd.set(
     "swordlandShowdownPreset",
@@ -77,6 +81,7 @@ export function RosterTemplateWizard({
 }: {
   guilds: { id: string; discordGuildId: string }[];
 }) {
+  const locale = useLocale() as AppLocale;
   const [step, setStep] = useState(1);
   const [maxStepReached, setMaxStepReached] = useState(1);
   const [previewState, setPreviewState] = useState<RosterPreviewState>(null);
@@ -91,6 +96,9 @@ export function RosterTemplateWizard({
   const [rosterDraftL2, setRosterDraftL2] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [reviewTab, setReviewTab] = useState<
+    "summary" | "timeline" | "discord"
+  >("summary");
 
   const selectedPreset = getEventPresetById(eventPresetId);
   const presetWizardOk =
@@ -125,8 +133,7 @@ export function RosterTemplateWizard({
       ]).length,
     [liveL1, liveL2],
   );
-  const bucketsL1 = useMemo(() => bucketPlayers104050(liveL1), [liveL1]);
-  const bucketsL2 = useMemo(() => bucketPlayers104050(liveL2), [liveL2]);
+  const handleRosterParsed = useCallback(() => {}, []);
 
   const step1Valid = Boolean(
     guildId && templateName.trim() && presetWizardOk,
@@ -422,162 +429,53 @@ export function RosterTemplateWizard({
         {step === 3 ? (
           <section className="strategy-wizard__step-body" aria-labelledby="sw-s3">
             <h2 id="sw-s3" className="strategy-wizard__step-title">
-              <span aria-hidden>👥</span> Étape 3 — Rosters (2 légions)
+              <span aria-hidden>👥</span> Étape 3 — Rosters
             </h2>
             <p className="strategy-wizard__step-desc muted">
               Une ligne = <code className="roster-code-hint">NOM PUISSANCE</code>{" "}
               (ex. <code className="roster-code-hint">CRICKETTS 3704</code>). Les
-              lignes vides sont ignorées. Pas de séparateur manuel : la colonne
-              de droite alimente la légion&nbsp;2.
+              lignes vides sont ignorées.
             </p>
             <ul className="strategy-wizard__roster-hints muted">
-              <li>Légion 1 obligatoire au moins un joueur.</li>
-              <li>Légion 2 optionnelle — vide = génération à une seule légion.</li>
+              <li>
+                {eventPresetId === "swordland_showdown"
+                  ? "Légion 1 : au moins un joueur."
+                  : "Groupe A : au moins un joueur."}
+              </li>
+              <li>
+                {eventPresetId === "swordland_showdown"
+                  ? "Légion 2 optionnelle — vide = une seule légion."
+                  : "Groupe B optionnel."}
+              </li>
             </ul>
 
-            <div className="strategy-wizard__roster-two-col">
-              <div className="strategy-wizard__roster-col">
-                <label className="strategy-wizard__roster-col-label" htmlFor="sw-roster-l1">
-                  Légion 1
-                </label>
-                <textarea
-                  id="sw-roster-l1"
-                  value={rosterDraftL1}
-                  onChange={(e) => setRosterDraftL1(e.target.value)}
-                  rows={11}
-                  className="roster-textarea strategy-wizard__textarea"
-                  placeholder={"CRICKETTS 3704\nEDA 3014\nTOBI 2662"}
-                />
-              </div>
-              <div className="strategy-wizard__roster-col">
-                <label className="strategy-wizard__roster-col-label" htmlFor="sw-roster-l2">
-                  Légion 2 <span className="muted">(optionnel)</span>
-                </label>
-                <textarea
-                  id="sw-roster-l2"
-                  value={rosterDraftL2}
-                  onChange={(e) => setRosterDraftL2(e.target.value)}
-                  rows={11}
-                  className="roster-textarea strategy-wizard__textarea"
-                  placeholder={"AZWILD 2100\n…"}
-                />
-              </div>
-            </div>
-
-            <div className="strategy-wizard__live-preview">
-              <h3 className="strategy-wizard__live-title">
-                <span aria-hidden>◈</span> Aperçu live par légion — 10 / 40 / 50
-              </h3>
-              {liveL1.length === 0 && liveL2.length === 0 ? (
-                <p className="muted strategy-wizard__live-empty">
-                  Saisissez au moins un joueur en Légion&nbsp;1.
-                </p>
-              ) : (
-                <div className="strategy-wizard__legion-preview-grid">
-                  {(
-                    [
-                      {
-                        title: "Légion 1",
-                        n: liveL1.length,
-                        buckets: bucketsL1,
-                      },
-                      {
-                        title: "Légion 2",
-                        n: liveL2.length,
-                        buckets: bucketsL2,
-                      },
-                    ] as const
-                  ).map((block) => (
-                    <div
-                      key={block.title}
-                      className="strategy-wizard__legion-preview-block"
-                    >
-                      <div className="strategy-wizard__legion-preview-head">
-                        <strong>{block.title}</strong>
-                        <span className="muted">
-                          {block.n} joueur{block.n !== 1 ? "s" : ""}
-                          {block.title === "Légion 2" && block.n === 0
-                            ? " — une seule légion si vide"
-                            : ""}
-                        </span>
-                      </div>
-                      {block.n === 0 ? (
-                        <p className="muted strategy-wizard__live-empty strategy-wizard__live-empty--tight">
-                          Aucune ligne reconnue.
-                        </p>
-                      ) : (
-                        <div className="strategy-wizard__bucket-grid strategy-wizard__bucket-grid--compact">
-                          <article className="strategy-wizard__bucket-card strategy-wizard__bucket-card--leaders">
-                            <div className="strategy-wizard__bucket-head">
-                              <span aria-hidden>👑</span> Leaders
-                              <span className="strategy-wizard__bucket-pct">
-                                ~10%
-                              </span>
-                            </div>
-                            <ul className="strategy-wizard__bucket-list">
-                              {block.buckets.leaders.map((p) => (
-                                <li key={p.name}>
-                                  <strong>{p.name}</strong>{" "}
-                                  <span className="muted">
-                                    {fmtPowerShort(p.power)}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </article>
-                          <article className="strategy-wizard__bucket-card strategy-wizard__bucket-card--core">
-                            <div className="strategy-wizard__bucket-head">
-                              <span aria-hidden>🛡</span> Noyau défense
-                              <span className="strategy-wizard__bucket-pct">
-                                ~40%
-                              </span>
-                            </div>
-                            <ul className="strategy-wizard__bucket-list">
-                              {block.buckets.defenders.slice(0, 12).map((p) => (
-                                <li key={p.name}>
-                                  <strong>{p.name}</strong>{" "}
-                                  <span className="muted">
-                                    {fmtPowerShort(p.power)}
-                                  </span>
-                                </li>
-                              ))}
-                              {block.buckets.defenders.length > 12 ? (
-                                <li className="muted">
-                                  +{block.buckets.defenders.length - 12} autres
-                                </li>
-                              ) : null}
-                            </ul>
-                          </article>
-                          <article className="strategy-wizard__bucket-card strategy-wizard__bucket-card--mobile">
-                            <div className="strategy-wizard__bucket-head">
-                              <span aria-hidden>⚡</span> Mobile
-                              <span className="strategy-wizard__bucket-pct">
-                                ~50%
-                              </span>
-                            </div>
-                            <ul className="strategy-wizard__bucket-list">
-                              {block.buckets.mobile.slice(0, 12).map((p) => (
-                                <li key={p.name}>
-                                  <strong>{p.name}</strong>{" "}
-                                  <span className="muted">
-                                    {fmtPowerShort(p.power)}
-                                  </span>
-                                </li>
-                              ))}
-                              {block.buckets.mobile.length > 12 ? (
-                                <li className="muted">
-                                  +{block.buckets.mobile.length - 12} autres
-                                </li>
-                              ) : null}
-                            </ul>
-                          </article>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <RosterEditor
+              groupALabel={
+                eventPresetId === "swordland_showdown"
+                  ? "Légion 1"
+                  : "Groupe A"
+              }
+              groupBLabel={
+                eventPresetId === "swordland_showdown"
+                  ? "Légion 2"
+                  : "Groupe B"
+              }
+              groupABadge={
+                eventPresetId === "swordland_showdown"
+                  ? "Principal"
+                  : "Principal"
+              }
+              groupBBadge={
+                eventPresetId === "swordland_showdown"
+                  ? "Secondaire"
+                  : "Secondaire"
+              }
+              valueA={rosterDraftL1}
+              valueB={rosterDraftL2}
+              onValueAChange={setRosterDraftL1}
+              onValueBChange={setRosterDraftL2}
+              onRosterChange={handleRosterParsed}
+            />
 
             <div className="strategy-wizard__nav">
               <button
@@ -706,142 +604,217 @@ export function RosterTemplateWizard({
               </ul>
             ) : null}
 
-            <div className="roster-review-grid roster-war-command-center">
-              <aside className="roster-review-col roster-review-col--left">
-                <SectionCard
-                  title={
-                    <>
-                      <span aria-hidden>◆</span> Synthèse
-                    </>
-                  }
-                  subtitle={`${previewState.players.length} joueurs · ${previewState.echo.eventDurationMinutes} min`}
+            <div className="roster-review-tabs roster-war-command-center">
+              <div
+                className="roster-review-tabs__list"
+                role="tablist"
+                aria-label="Sections de la revue"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  id="roster-review-tab-summary"
+                  aria-selected={reviewTab === "summary"}
+                  aria-controls="roster-review-panel-summary"
+                  className={`roster-review-tabs__tab${reviewTab === "summary" ? " roster-review-tabs__tab--active" : ""}`}
+                  onClick={() => setReviewTab("summary")}
                 >
-                  <dl className="roster-review-stats">
-                    <dt>Phases</dt>
-                    <dd>
-                      <strong>{sortedGlobalPhases.length}</strong> annonces Discord
-                      {previewState.phases.length > sortedGlobalPhases.length ? (
-                        <span className="muted">
-                          {" "}
-                          · {previewState.phases.length - sortedGlobalPhases.length}{" "}
-                          fiches légion
-                        </span>
-                      ) : null}
-                    </dd>
-                    <dt>Arc</dt>
-                    <dd>
-                      <strong>
-                        {
-                          BATTLE_ARCHETYPE_OPTIONS.find(
-                            (o) =>
-                              o.value === previewState.echo.battleArchetype,
-                          )?.label
-                        }
-                      </strong>
-                    </dd>
-                  </dl>
-                </SectionCard>
-
-                <SectionCard
-                  title={
-                    <>
-                      <span aria-hidden>👤</span> Candidats RL
-                    </>
-                  }
-                  subtitle="Shotcallers indicatifs"
+                  <span aria-hidden>◆</span> Synthèse &amp; ORBAT
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="roster-review-tab-timeline"
+                  aria-selected={reviewTab === "timeline"}
+                  aria-controls="roster-review-panel-timeline"
+                  className={`roster-review-tabs__tab${reviewTab === "timeline" ? " roster-review-tabs__tab--active" : ""}`}
+                  onClick={() => setReviewTab("timeline")}
                 >
-                  <ul className="roster-leader-list">
-                    {previewState.leaders.map((p, i) => (
-                      <li key={`${p.name}-${i}`}>
-                        <strong>{p.name}</strong>{" "}
-                        <span className="muted">
-                          ({fmtPowerShort(p.power)})
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </SectionCard>
-
-                <SectionCard
-                  title={
-                    <>
-                      <span aria-hidden>🗺</span> Bâtiments & ORBAT
-                    </>
-                  }
-                  subtitle="Assignations automatiques"
-                  className="section-card--orbat"
+                  <span aria-hidden>◎</span> Timeline
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="roster-review-tab-discord"
+                  aria-selected={reviewTab === "discord"}
+                  aria-controls="roster-review-panel-discord"
+                  className={`roster-review-tabs__tab${reviewTab === "discord" ? " roster-review-tabs__tab--active" : ""}`}
+                  onClick={() => setReviewTab("discord")}
                 >
-                  <TacticalOrbatPanel plan={previewState.tacticalPlan} />
-                </SectionCard>
-              </aside>
-
-              <div className="roster-review-col roster-review-col--center">
-                <SectionCard
-                  title={
-                    <>
-                      <span aria-hidden>◎</span> Timeline tactique
-                    </>
-                  }
-                  subtitle="Timeline alliance (annonces Discord) — les fiches légion se règlent après enregistrement dans l’éditeur."
-                  className="section-card--timeline"
-                >
-                  <RosterDraftTimeline
-                    phases={sortedGlobalPhases}
-                    eventDurationMinutes={
-                      previewState.echo.eventDurationMinutes
-                    }
-                    selectedKey={selectedKey}
-                    onSelectPhase={setSelectedKey}
-                    phaseOverlays={previewState.tacticalPlan.phaseOverlays}
-                  />
-                  <div className="tactical-phase-pills" role="list">
-                    {sortedGlobalPhases.map((match) => (
-                      <button
-                        key={match.key}
-                        type="button"
-                        role="listitem"
-                        className="tactical-phase-pill"
-                        onClick={() => setSelectedKey(match.key)}
-                      >
-                        <span className="tactical-phase-pill__t">
-                          {formatOffsetLabel(match.offsetSeconds)}
-                        </span>
-                        <span className="tactical-phase-pill__type">
-                          {match.phaseType}
-                        </span>
-                        <span>{match.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                </SectionCard>
+                  <span aria-hidden>💬</span> Discord
+                </button>
               </div>
 
-              <aside className="roster-review-col roster-review-col--right">
-                <SectionCard
-                  title={
-                    <>
-                      <span aria-hidden>💬</span> Discord
-                    </>
-                  }
-                  subtitle="Message de la phase sélectionnée"
+              {reviewTab === "summary" ? (
+                <div
+                  className="roster-review-tabs__panel"
+                  role="tabpanel"
+                  id="roster-review-panel-summary"
+                  aria-labelledby="roster-review-tab-summary"
                 >
-                  {selectedPhase ? (
-                    <TacticalPhasePreview
-                      phaseType={selectedPhase.phaseType}
-                      title={selectedPhase.title}
-                      objective={
-                        selectedOverlay?.markdownAppendix
-                          ? `${selectedPhase.objective.trim()}${selectedOverlay.markdownAppendix}`
-                          : selectedPhase.objective
+                  <div className="roster-review-tabs__stack">
+                    <SectionCard
+                      title={
+                        <>
+                          <span aria-hidden>◆</span> Synthèse
+                        </>
                       }
-                      action={selectedPhase.action}
-                      nextHint={selectedPhase.nextHint}
+                      subtitle={`${previewState.players.length} joueurs · ${previewState.echo.eventDurationMinutes} min`}
+                    >
+                      <dl className="roster-review-stats">
+                        <dt>Phases</dt>
+                        <dd>
+                          <strong>{sortedGlobalPhases.length}</strong> annonces
+                          Discord
+                          {previewState.phases.length >
+                          sortedGlobalPhases.length ? (
+                            <span className="muted">
+                              {" "}
+                              ·{" "}
+                              {previewState.phases.length -
+                                sortedGlobalPhases.length}{" "}
+                              fiches légion
+                            </span>
+                          ) : null}
+                        </dd>
+                        <dt>Arc</dt>
+                        <dd>
+                          <strong>
+                            {
+                              BATTLE_ARCHETYPE_OPTIONS.find(
+                                (o) =>
+                                  o.value === previewState.echo.battleArchetype,
+                              )?.label
+                            }
+                          </strong>
+                        </dd>
+                      </dl>
+                    </SectionCard>
+
+                    <SectionCard
+                      title={
+                        <>
+                          <span aria-hidden>👤</span> Candidats RL
+                        </>
+                      }
+                      subtitle="Shotcallers indicatifs"
+                    >
+                      <ul className="roster-leader-list">
+                        {previewState.leaders.map((p, i) => (
+                          <li key={`${p.name}-${i}`}>
+                            <strong>{p.name}</strong>{" "}
+                            <span className="muted">
+                              ({fmtPowerShort(p.power)})
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </SectionCard>
+
+                    <SectionCard
+                      title={
+                        <>
+                          <span aria-hidden>🗺</span> Bâtiments &amp; ORBAT
+                        </>
+                      }
+                      subtitle="Assignations automatiques"
+                      className="section-card--orbat"
+                    >
+                      <TacticalOrbatPanel plan={previewState.tacticalPlan} />
+                    </SectionCard>
+                  </div>
+                </div>
+              ) : null}
+
+              {reviewTab === "timeline" ? (
+                <div
+                  className="roster-review-tabs__panel"
+                  role="tabpanel"
+                  id="roster-review-panel-timeline"
+                  aria-labelledby="roster-review-tab-timeline"
+                >
+                  <SectionCard
+                    title={
+                      <>
+                        <span aria-hidden>◎</span> Timeline tactique
+                      </>
+                    }
+                    subtitle="Timeline alliance (annonces Discord) — les fiches légion se règlent après enregistrement dans l’éditeur."
+                    className="section-card--timeline"
+                  >
+                    <RosterDraftTimeline
+                      phases={sortedGlobalPhases}
+                      eventDurationMinutes={
+                        previewState.echo.eventDurationMinutes
+                      }
+                      selectedKey={selectedKey}
+                      onSelectPhase={setSelectedKey}
+                      phaseOverlays={previewState.tacticalPlan.phaseOverlays}
                     />
-                  ) : (
-                    <p className="muted">Choisissez une phase.</p>
-                  )}
-                </SectionCard>
-              </aside>
+                    <div className="tactical-phase-pills" role="list">
+                      {sortedGlobalPhases.map((match) => (
+                        <button
+                          key={match.key}
+                          type="button"
+                          role="listitem"
+                          className="tactical-phase-pill"
+                          onClick={() => setSelectedKey(match.key)}
+                        >
+                          <span className="tactical-phase-pill__t">
+                            {formatOffsetLabel(match.offsetSeconds, locale)}
+                          </span>
+                          <span className="tactical-phase-pill__type">
+                            {match.phaseType}
+                          </span>
+                          <span>{match.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </SectionCard>
+                </div>
+              ) : null}
+
+              {reviewTab === "discord" ? (
+                <div
+                  className="roster-review-tabs__panel"
+                  role="tabpanel"
+                  id="roster-review-panel-discord"
+                  aria-labelledby="roster-review-tab-discord"
+                >
+                  <p className="roster-review-tabs__hint muted">
+                    La phase affichée est celle sélectionnée dans l’onglet{" "}
+                    <strong>Timeline</strong>. Passez-y pour choisir une autre
+                    annonce.
+                  </p>
+                  <SectionCard
+                    title={
+                      <>
+                        <span aria-hidden>💬</span> Discord
+                      </>
+                    }
+                    subtitle="Message de la phase sélectionnée"
+                  >
+                    {selectedPhase ? (
+                      <TacticalPhasePreview
+                        phaseType={selectedPhase.phaseType}
+                        title={selectedPhase.title}
+                        objective={
+                          selectedOverlay?.markdownAppendix
+                            ? `${selectedPhase.objective.trim()}${selectedOverlay.markdownAppendix}`
+                            : selectedPhase.objective
+                        }
+                        action={selectedPhase.action}
+                        nextHint={selectedPhase.nextHint}
+                      />
+                    ) : (
+                      <p className="muted">
+                        Aucune phase sélectionnée — ouvrez l’onglet{" "}
+                        <strong>Timeline</strong> et cliquez une phase.
+                      </p>
+                    )}
+                  </SectionCard>
+                </div>
+              ) : null}
             </div>
 
             <div className="btn-row roster-review-bottom-actions">
