@@ -48,6 +48,30 @@ export async function fetchGuildTextChannels(
     });
 }
 
+export type GuildChannelOption = { id: string; name: string };
+
+/**
+ * Appels Discord en parallèle (évite N × latence réseau en série sur le dashboard).
+ */
+export async function fetchGuildTextChannelOptionsByGuildId(
+  guilds: { id: string; discordGuildId: string }[],
+): Promise<Map<string, GuildChannelOption[]>> {
+  if (!hasDiscordBotToken() || guilds.length === 0) {
+    return new Map(guilds.map((g) => [g.id, []]));
+  }
+  const pairs = await Promise.all(
+    guilds.map(async (g) => {
+      const raw = await fetchGuildTextChannels(g.discordGuildId);
+      const opts: GuildChannelOption[] = raw.map((c) => ({
+        id: c.id,
+        name: c.name,
+      }));
+      return [g.id, opts] as const;
+    }),
+  );
+  return new Map(pairs);
+}
+
 export async function assertGuildTextChannelId(
   discordGuildId: string,
   channelId: string,

@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import type { TimelineScope } from "@/lib/timeline-scope";
 import {
   addPhaseAction,
-  deleteTemplateAction,
+  clearPhaseDiscordOverrideAction,
+  restorePhaseDiscordDraftAction,
   updatePhaseAction,
   updateTemplateMetaAction,
 } from "@/actions/data";
 import { TacticalPhasePreview } from "@/components/tactical-phase-preview";
 import { TemplatePhaseTimeline } from "@/components/template-phase-timeline";
-import { ConfirmDestructive } from "@/components/ui/confirm-dialog";
+import { TemplateDeleteBlock } from "@/components/template-delete-block";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { PreviewPanel } from "@/components/ui/preview-panel";
@@ -22,8 +24,29 @@ export type { EditorPhase };
 
 type PreviewDraft = Pick<
   EditorPhase,
-  "phaseType" | "title" | "objective" | "action" | "nextHint"
+  | "phaseType"
+  | "title"
+  | "objective"
+  | "action"
+  | "nextHint"
+  | "customDiscordText"
 >;
+
+const SCOPE_TAB_ORDER: TimelineScope[] = ["GLOBAL", "LEGION_1", "LEGION_2"];
+
+const SCOPE_LABELS: Record<TimelineScope, string> = {
+  GLOBAL: "Global",
+  LEGION_1: "Légion 1",
+  LEGION_2: "Légion 2",
+};
+
+function sortEditorPhases(a: EditorPhase, b: EditorPhase): number {
+  return (
+    a.offsetSeconds - b.offsetSeconds ||
+    a.orderIndex - b.orderIndex ||
+    a.key.localeCompare(b.key)
+  );
+}
 
 const PHASE_TYPES: { id: string; label: string; hint: string }[] = [
   { id: "START", label: "Lancement", hint: "Ouverture de session" },
@@ -46,6 +69,7 @@ export function TemplateEditorShell({
   name: initialName,
   description: initialDescription,
   eventDurationMinutes: initialEventDurationMinutes,
+  eventProductKey,
   phases,
   draftSource,
 }: {
@@ -53,20 +77,37 @@ export function TemplateEditorShell({
   name: string;
   description: string | null;
   eventDurationMinutes: number;
+  eventProductKey: string | null;
   phases: EditorPhase[];
   /** Brouillon auto depuis roster. */
   draftSource?: "roster" | null;
 }) {
-  const sorted = useMemo(
-    () =>
-      [...phases].sort(
-        (a, b) =>
-          a.offsetSeconds - b.offsetSeconds || a.key.localeCompare(b.key),
-      ),
-    [phases],
-  );
+  const tabScopes = useMemo((): TimelineScope[] => {
+    const present = new Set(phases.map((p) => p.timelineScope));
+    return SCOPE_TAB_ORDER.filter((s) => present.has(s));
+  }, [phases]);
+
+  const showTabs = tabScopes.length > 1;
+
+  const [activeScope, setActiveScope] = useState<TimelineScope>("GLOBAL");
+
+  useEffect(() => {
+    if (!tabScopes.includes(activeScope)) {
+      setActiveScope(tabScopes[0] ?? "GLOBAL");
+    }
+  }, [tabScopes, activeScope]);
+
+  const visiblePhases = useMemo(() => {
+    if (!showTabs) return [...phases].sort(sortEditorPhases);
+    return phases
+      .filter((p) => p.timelineScope === activeScope)
+      .sort(sortEditorPhases);
+  }, [phases, activeScope, showTabs]);
+
+  const reorderScope: TimelineScope = showTabs ? activeScope : "GLOBAL";
+
   const [selectedId, setSelectedId] = useState<string | null>(
-    sorted[0]?.id ?? null,
+    visiblePhases[0]?.id ?? null,
   );
   const [editDraft, setEditDraft] = useState<PreviewDraft | null>(null);
 
@@ -75,20 +116,24 @@ export function TemplateEditorShell({
   }, [selectedId]);
 
   useEffect(() => {
-    if (selectedId && !sorted.some((p) => p.id === selectedId)) {
-      setSelectedId(sorted[0]?.id ?? null);
-    }
-  }, [sorted, selectedId]);
+    if (selectedId && visiblePhases.some((p) => p.id === selectedId)) return;
+    setSelectedId(visiblePhases[0]?.id ?? null);
+  }, [visiblePhases, selectedId]);
 
-  const selected = sorted.find((p) => p.id === selectedId) ?? null;
+  const selected = visiblePhases.find((p) => p.id === selectedId) ?? null;
   const previewPhase: EditorPhase | null = selected
     ? { ...selected, ...(editDraft ?? {}) }
     : null;
 
   const timelineSpanSec = useMemo(() => {
-    if (sorted.length === 0) return 0;
-    return Math.max(...sorted.map((p) => p.offsetSeconds));
-  }, [sorted]);
+    if (phases.length === 0) return 0;
+    return Math.max(...phases.map((p) => p.offsetSeconds));
+  }, [phases]);
+
+  const scopeHint =
+    activeScope === "GLOBAL"
+      ? "Timeline alliance : ce sont ces phases que le bot publie sur Discord (T+)."
+      : "Plan tactique de légion : consigne interne — non postée automatiquement par le bot.";
 
   return (
     <div className="dashboard-main template-editor">
@@ -163,19 +208,13 @@ export function TemplateEditorShell({
 
           <SectionCard title="Suppression">
             <p className="field-hint">
-              À utiliser seulement si plus aucune bataille n’utilise ce modèle.
+              Supprime définitivement ce modèle et toutes ses phases. Bloqué si une
+              bataille ou un lancement programmé y est encore lié.
             </p>
-            <ConfirmDestructive
-              label="Supprimer ce modèle…"
-              confirmLabel="Confirmer la suppression définitive ?"
-            >
-              <form action={deleteTemplateAction}>
-                <input type="hidden" name="id" value={templateId} />
-                <button type="submit" className="btn btn-danger">
-                  Oui, supprimer
-                </button>
-              </form>
-            </ConfirmDestructive>
+            <TemplateDeleteBlock
+              templateId={templateId}
+              templateName={initialName}
+            />
           </SectionCard>
         </aside>
 
@@ -185,9 +224,34 @@ export function TemplateEditorShell({
             title="Fil des annonces"
             subtitle="Grande vue verticale : survol pour l’aperçu Discord, clic pour modifier, poignée pour réordonner."
           >
+            {showTabs ? (
+              <>
+                <div
+                  className="template-editor__scope-tabs"
+                  role="tablist"
+                  aria-label="Portée de la timeline"
+                >
+                  {tabScopes.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeScope === s}
+                      className={`template-editor__scope-tab ${activeScope === s ? "template-editor__scope-tab--on" : ""}`}
+                      onClick={() => setActiveScope(s)}
+                    >
+                      {SCOPE_LABELS[s]}
+                    </button>
+                  ))}
+                </div>
+                <p className="template-editor__scope-hint muted">{scopeHint}</p>
+              </>
+            ) : null}
+
             <TemplatePhaseTimeline
-              phases={sorted}
+              phases={visiblePhases}
               templateId={templateId}
+              timelineScope={reorderScope}
               selectedId={selectedId}
               onSelectPhase={setSelectedId}
             />
@@ -197,13 +261,17 @@ export function TemplateEditorShell({
                 key={selected.id}
                 phase={selected}
                 templateId={templateId}
+                eventProductKey={eventProductKey}
                 onLivePreview={setEditDraft}
               />
             ) : (
               <EmptyState title="Sélectionne une étape dans la timeline" />
             )}
 
-            <GuidedAddPhase templateId={templateId} />
+            <GuidedAddPhase
+              templateId={templateId}
+              timelineScope={reorderScope}
+            />
           </SectionCard>
         </div>
 
@@ -216,6 +284,7 @@ export function TemplateEditorShell({
                 objective={previewPhase.objective}
                 action={previewPhase.action}
                 nextHint={previewPhase.nextHint}
+                customDiscordText={previewPhase.customDiscordText}
               />
             ) : (
               <p className="muted">Choisis une étape à gauche.</p>
@@ -230,18 +299,35 @@ export function TemplateEditorShell({
 function PhaseEditForm({
   phase,
   templateId,
+  eventProductKey,
   onLivePreview,
 }: {
   phase: EditorPhase;
   templateId: string;
+  eventProductKey: string | null;
   onLivePreview: (d: PreviewDraft | null) => void;
 }) {
+  const showTacticalBlock =
+    eventProductKey === "swordland" || phase.timelineScope !== "GLOBAL";
+
   const [minutes, setMinutes] = useState(minutesFromSeconds(phase.offsetSeconds));
   const [phaseType, setPhaseType] = useState(phase.phaseType);
   const [title, setTitle] = useState(phase.title);
   const [objective, setObjective] = useState(phase.objective);
   const [action, setAction] = useState(phase.action);
   const [nextHint, setNextHint] = useState(phase.nextHint);
+  const [buildingsText, setBuildingsText] = useState(
+    phase.targetedBuildings.join("\n"),
+  );
+  const [leadersText, setLeadersText] = useState(
+    phase.assignedLeaders.join("\n"),
+  );
+  const [playersText, setPlayersText] = useState(
+    phase.assignedPlayers.join("\n"),
+  );
+  const [customDiscord, setCustomDiscord] = useState(
+    phase.customDiscordText ?? "",
+  );
   const [advOpen, setAdvOpen] = useState(false);
   const [keyDraft, setKeyDraft] = useState(phase.key);
 
@@ -252,13 +338,32 @@ function PhaseEditForm({
     setObjective(phase.objective);
     setAction(phase.action);
     setNextHint(phase.nextHint);
+    setBuildingsText(phase.targetedBuildings.join("\n"));
+    setLeadersText(phase.assignedLeaders.join("\n"));
+    setPlayersText(phase.assignedPlayers.join("\n"));
+    setCustomDiscord(phase.customDiscordText ?? "");
     setKeyDraft(phase.key);
     setAdvOpen(false);
   }, [phase]);
 
   useEffect(() => {
-    onLivePreview({ phaseType, title, objective, action, nextHint });
-  }, [phaseType, title, objective, action, nextHint, onLivePreview]);
+    onLivePreview({
+      phaseType,
+      title,
+      objective,
+      action,
+      nextHint,
+      customDiscordText: customDiscord.trim() ? customDiscord : null,
+    });
+  }, [
+    phaseType,
+    title,
+    objective,
+    action,
+    nextHint,
+    customDiscord,
+    onLivePreview,
+  ]);
 
   return (
     <div className="phase-edit-box">
@@ -266,6 +371,7 @@ function PhaseEditForm({
       <form action={updatePhaseAction} className="form-stack">
         <input type="hidden" name="id" value={phase.id} />
         <input type="hidden" name="templateId" value={templateId} />
+        <input type="hidden" name="timelineScope" value={phase.timelineScope} />
         <input type="hidden" name="key" value={keyDraft} />
         <input
           type="hidden"
@@ -346,6 +452,66 @@ function PhaseEditForm({
           />
         </div>
 
+        {showTacticalBlock ? (
+          <>
+            <h4 className="phase-edit-box__title" style={{ fontSize: "1rem", marginTop: "0.5rem" }}>
+              Swordland — champs tactiques
+            </h4>
+            <p className="field-hint">
+              Bâtiments et assignations (Ouest / Est détaillés dans l’objectif et les tableaux ORBAT générés).
+              Un nom ou un bâtiment par ligne ; la virgule est aussi acceptée.
+            </p>
+            <div className="form-field">
+              <label htmlFor={`ed-bld-${phase.id}`}>Bâtiments ciblés</label>
+              <textarea
+                id={`ed-bld-${phase.id}`}
+                name="targetedBuildings"
+                value={buildingsText}
+                onChange={(e) => setBuildingsText(e.target.value)}
+                rows={3}
+                placeholder={"Bell Tower\nSanctum 1"}
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor={`ed-ld-${phase.id}`}>Leaders assignés</label>
+              <textarea
+                id={`ed-ld-${phase.id}`}
+                name="assignedLeaders"
+                value={leadersText}
+                onChange={(e) => setLeadersText(e.target.value)}
+                rows={2}
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor={`ed-pl-${phase.id}`}>Joueurs assignés</label>
+              <textarea
+                id={`ed-pl-${phase.id}`}
+                name="assignedPlayers"
+                value={playersText}
+                onChange={(e) => setPlayersText(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </>
+        ) : null}
+
+        <div className="form-field">
+          <label htmlFor={`ed-discord-${phase.id}`}>
+            Message Discord final (optionnel)
+          </label>
+          <textarea
+            id={`ed-discord-${phase.id}`}
+            name="customDiscordText"
+            value={customDiscord}
+            onChange={(e) => setCustomDiscord(e.target.value)}
+            rows={6}
+            placeholder="Si renseigné, remplace l’aperçu structuré à droite."
+          />
+          <p className="field-hint">
+            Laissez vide pour utiliser le rendu automatique à partir du titre, de l’objectif, de l’action et du prochain pas.
+          </p>
+        </div>
+
         <button
           type="button"
           className="btn btn-ghost btn-small"
@@ -374,11 +540,43 @@ function PhaseEditForm({
           Enregistrer l’étape
         </button>
       </form>
+      <div className="phase-edit-box__discord-actions">
+        <form action={restorePhaseDiscordDraftAction}>
+          <input type="hidden" name="id" value={phase.id} />
+          <input type="hidden" name="templateId" value={templateId} />
+          <button
+            type="submit"
+            className="btn btn-secondary btn-small"
+            disabled={!phase.generatedDiscordDraft?.trim()}
+          >
+            Restaurer le brouillon généré
+          </button>
+        </form>
+        <form action={clearPhaseDiscordOverrideAction}>
+          <input type="hidden" name="id" value={phase.id} />
+          <input type="hidden" name="templateId" value={templateId} />
+          <button
+            type="submit"
+            className="btn btn-ghost btn-small"
+            disabled={
+              !customDiscord.trim() && !phase.customDiscordText?.trim()
+            }
+          >
+            Aperçu auto (champs)
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
 
-function GuidedAddPhase({ templateId }: { templateId: string }) {
+function GuidedAddPhase({
+  templateId,
+  timelineScope,
+}: {
+  templateId: string;
+  timelineScope: TimelineScope;
+}) {
   const [minutes, setMinutes] = useState(0);
   const [phaseType, setPhaseType] = useState("REMINDER");
   const [title, setTitle] = useState("");
@@ -397,6 +595,7 @@ function GuidedAddPhase({ templateId }: { templateId: string }) {
         }}
       >
         <input type="hidden" name="templateId" value={templateId} />
+        <input type="hidden" name="timelineScope" value={timelineScope} />
         <input type="hidden" name="key" value="" />
         <input
           type="hidden"
@@ -474,6 +673,7 @@ function GuidedAddPhase({ templateId }: { templateId: string }) {
             objective={objective}
             action={action}
             nextHint={nextHint}
+            customDiscordText={null}
             compact
             showMessageChrome={false}
           />

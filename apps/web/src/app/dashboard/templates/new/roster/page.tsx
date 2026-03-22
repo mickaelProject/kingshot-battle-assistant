@@ -1,10 +1,17 @@
 import Link from "next/link";
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
+import {
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
 import { prisma } from "@/lib/prisma";
 import { RosterTemplateWizard } from "./roster-wizard";
 
 export default async function NewTemplateFromRosterPage() {
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const installRedirectUri = getDiscordInstallRedirectUri();
   const guilds = await prisma.guildSettings.findMany({
     orderBy: { discordGuildId: "asc" },
   });
@@ -22,10 +29,14 @@ export default async function NewTemplateFromRosterPage() {
       />
 
       {guilds.length === 0 ? (
-        <SectionCard title="Aucune guilde">
-          <p className="muted">
-            Invite le bot et utilise un slash une fois pour enregistrer ton serveur.
-          </p>
+        <SectionCard
+          title="Aucun serveur relié"
+          subtitle="Il faut d’abord ajouter le bot sur votre Discord et lancer une commande slash une fois."
+        >
+          <DiscordInviteCta
+            inviteUrl={discordInviteUrl}
+            installRedirectUri={installRedirectUri}
+          />
         </SectionCard>
       ) : (
         <RosterTemplateWizard guilds={guilds} />

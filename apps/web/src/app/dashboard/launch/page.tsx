@@ -1,31 +1,35 @@
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/auth";
 import {
-  fetchGuildTextChannels,
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
+import {
+  fetchGuildTextChannelOptionsByGuildId,
   hasDiscordBotToken,
 } from "@/lib/discord-rest";
 import { LaunchClient } from "./launch-client";
 
 export default async function LaunchPage() {
-  await requireAdmin();
-  const guilds = await prisma.guildSettings.findMany({
-    orderBy: { discordGuildId: "asc" },
-    select: {
-      id: true,
-      discordGuildId: true,
-      battleChannelId: true,
-    },
-  });
-  const templates = await prisma.battleTemplate.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true, guildId: true },
-  });
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const discordInstallRedirectUri = getDiscordInstallRedirectUri();
+  const [guilds, templates] = await Promise.all([
+    prisma.guildSettings.findMany({
+      orderBy: { discordGuildId: "asc" },
+      select: {
+        id: true,
+        discordGuildId: true,
+        battleChannelId: true,
+      },
+    }),
+    prisma.battleTemplate.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, guildId: true },
+    }),
+  ]);
 
-  const channelsByGuildId: Record<string, { id: string; name: string }[]> = {};
-  for (const g of guilds) {
-    const raw = await fetchGuildTextChannels(g.discordGuildId);
-    channelsByGuildId[g.id] = raw.map((c) => ({ id: c.id, name: c.name }));
-  }
+  const channelMap = await fetchGuildTextChannelOptionsByGuildId(guilds);
+  const channelsByGuildId: Record<string, { id: string; name: string }[]> =
+    Object.fromEntries(channelMap);
 
   return (
     <LaunchClient
@@ -37,6 +41,8 @@ export default async function LaunchPage() {
       templates={templates}
       channelsByGuildId={channelsByGuildId}
       discordConfigured={hasDiscordBotToken()}
+      discordInviteUrl={discordInviteUrl}
+      discordInstallRedirectUri={discordInstallRedirectUri}
     />
   );
 }

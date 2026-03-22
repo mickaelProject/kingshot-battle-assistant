@@ -12,6 +12,7 @@ import {
 } from "./control/http-control-server.js";
 import { prisma } from "./db/prisma.js";
 import { processDueManagedEvents } from "./services/managed-event-poller.js";
+import { ensureGuildSettings } from "./services/guild-settings-service.js";
 import { ReminderScheduler } from "./services/reminder-scheduling-service.js";
 import { log } from "./util/log.js";
 
@@ -26,6 +27,21 @@ const MANAGED_POLL_MS = 15_000;
 
 client.once(Events.ClientReady, async (c) => {
   log.info("bot", "Discord prêt", { user: c.user.tag });
+  let synced = 0;
+  for (const [, guild] of c.guilds.cache) {
+    try {
+      await ensureGuildSettings(guild.id);
+      synced += 1;
+    } catch (e) {
+      log.error("bot", "sync guilde au démarrage impossible", {
+        discordGuildId: guild.id,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  if (synced > 0) {
+    log.info("bot", "guildes synchronisées avec la base", { count: synced });
+  }
   await scheduler.hydrateFromDatabase();
   startHttpControlServer(scheduler);
   setInterval(() => {
@@ -40,6 +56,21 @@ client.once(Events.ClientReady, async (c) => {
       message: err instanceof Error ? err.message : String(err),
     }),
   );
+});
+
+client.on(Events.GuildCreate, async (guild) => {
+  try {
+    await ensureGuildSettings(guild.id);
+    log.info("bot", "guilde enregistrée en base", {
+      discordGuildId: guild.id,
+      name: guild.name,
+    });
+  } catch (e) {
+    log.error("bot", "GuildCreate — enregistrement guilde impossible", {
+      discordGuildId: guild.id,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

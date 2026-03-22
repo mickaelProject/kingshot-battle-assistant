@@ -1,10 +1,17 @@
 import Link from "next/link";
 import { createTemplateAction } from "@/actions/data";
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
+import {
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
 import { prisma } from "@/lib/prisma";
 
 export default async function NewTemplateManualPage() {
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const installRedirectUri = getDiscordInstallRedirectUri();
   const guilds = await prisma.guildSettings.findMany({
     orderBy: { discordGuildId: "asc" },
   });
@@ -22,11 +29,14 @@ export default async function NewTemplateManualPage() {
       />
 
       {guilds.length === 0 ? (
-        <SectionCard title="Aucune guilde">
-          <p className="muted">
-            Invite le bot sur Discord et utilise une commande slash une fois (ex.{" "}
-            <code>/setup channel</code>) pour créer la fiche serveur.
-          </p>
+        <SectionCard
+          title="Aucun serveur relié"
+          subtitle="Même prérequis que pour la génération depuis roster."
+        >
+          <DiscordInviteCta
+            inviteUrl={discordInviteUrl}
+            installRedirectUri={installRedirectUri}
+          />
         </SectionCard>
       ) : (
         <SectionCard title="Informations">

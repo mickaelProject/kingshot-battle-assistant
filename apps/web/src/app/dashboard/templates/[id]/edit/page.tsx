@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { TemplateEditorShell } from "@/components/template-editor-shell";
 import { fetchBattleTemplateForEdit } from "@/lib/battle-templates-queries";
+import { jsonToStringArray } from "@/lib/editor-phase";
 
 export default async function EditTemplatePage({
   params,
@@ -17,6 +18,7 @@ export default async function EditTemplatePage({
 
   const phases = template.events.map((ev) => ({
     id: ev.id,
+    orderIndex: ev.orderIndex,
     offsetSeconds: ev.offsetSeconds,
     phaseType: ev.phaseType,
     key: ev.key,
@@ -24,6 +26,12 @@ export default async function EditTemplatePage({
     objective: ev.objective,
     action: ev.action,
     nextHint: ev.nextHint,
+    timelineScope: ev.timelineScope,
+    targetedBuildings: jsonToStringArray(ev.targetedBuildings),
+    assignedLeaders: jsonToStringArray(ev.assignedLeaders),
+    assignedPlayers: jsonToStringArray(ev.assignedPlayers),
+    customDiscordText: ev.customDiscordText ?? null,
+    generatedDiscordDraft: ev.generatedDiscordDraft ?? null,
   }));
 
   return (
@@ -32,6 +40,7 @@ export default async function EditTemplatePage({
       name={template.name}
       description={template.description}
       eventDurationMinutes={template.eventDurationMinutes}
+      eventProductKey={template.eventProductKey ?? null}
       phases={phases}
       draftSource={draftSource}
     />

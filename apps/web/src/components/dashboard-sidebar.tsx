@@ -39,6 +39,14 @@ const NAV = [
     live: false,
     match: (p: string) => p.startsWith("/dashboard/server"),
   },
+  {
+    href: "/app",
+    label: "Espace joueur",
+    short: "Live",
+    live: false,
+    match: (p: string) =>
+      p.startsWith("/app") || p.startsWith("/battle"),
+  },
 ] as const;
 
 export function DashboardSidebar() {

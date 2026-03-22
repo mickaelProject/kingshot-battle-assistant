@@ -1,11 +1,18 @@
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import {
-  fetchGuildTextChannels,
+  fetchGuildTextChannelOptionsByGuildId,
   hasDiscordBotToken,
 } from "@/lib/discord-rest";
+import {
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
 import { prisma } from "@/lib/prisma";
 import { GuildSettingsCard } from "./guild-settings-card";
 
 export default async function GuildPage() {
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const installRedirectUri = getDiscordInstallRedirectUri();
   const guilds = await prisma.guildSettings.findMany({
     orderBy: { discordGuildId: "asc" },
     include: {
@@ -14,14 +21,7 @@ export default async function GuildPage() {
   });
 
   const discordConfigured = hasDiscordBotToken();
-  const channelsByGuild = new Map<string, { id: string; name: string }[]>();
-  for (const g of guilds) {
-    const raw = await fetchGuildTextChannels(g.discordGuildId);
-    channelsByGuild.set(
-      g.id,
-      raw.map((c) => ({ id: c.id, name: c.name })),
-    );
-  }
+  const channelsByGuild = await fetchGuildTextChannelOptionsByGuildId(guilds);
 
   return (
     <main>
@@ -34,7 +34,14 @@ export default async function GuildPage() {
 
       {guilds.length === 0 ? (
         <div className="card">
-          <p>No guilds. Invite the bot and run a slash command once.</p>
+          <p className="muted">
+            Aucune guilde en base. Invitez le bot puis utilisez une commande slash
+            (admin Discord) une fois.
+          </p>
+          <DiscordInviteCta
+            inviteUrl={discordInviteUrl}
+            installRedirectUri={installRedirectUri}
+          />
         </div>
       ) : (
         guilds.map((g) => (

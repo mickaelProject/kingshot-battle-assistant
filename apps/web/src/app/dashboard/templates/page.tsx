@@ -1,8 +1,14 @@
 import Link from "next/link";
+import { TemplateCreationSource } from "@prisma/client";
 import { duplicateTemplateAction } from "@/actions/data";
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { TemplateMiniTimeline } from "@/components/template-mini-timeline";
+import {
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
 import { fetchBattleTemplatesForTemplatesPage } from "@/lib/battle-templates-queries";
 import { prisma } from "@/lib/prisma";
 import {
@@ -11,11 +17,14 @@ import {
 } from "@/lib/time-human";
 
 export default async function TemplatesPage() {
-  const templates = await fetchBattleTemplatesForTemplatesPage();
-
-  const guilds = await prisma.guildSettings.findMany({
-    select: { id: true },
-  });
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const installRedirectUri = getDiscordInstallRedirectUri();
+  const [templates, guilds] = await Promise.all([
+    fetchBattleTemplatesForTemplatesPage(),
+    prisma.guildSettings.findMany({
+      select: { id: true },
+    }),
+  ]);
 
   return (
     <div className="dashboard-main templates-dashboard">
@@ -23,9 +32,26 @@ export default async function TemplatesPage() {
         title="Arsenal de modèles"
         description="Scénarios réutilisables : durée terrain, annonces Discord, lancement en un clic."
         actions={
-          <Link href="/dashboard/templates/new" className="btn btn-primary">
-            + Créer un modèle
-          </Link>
+          <div className="template-create-split">
+            <Link
+              href="/dashboard/templates/new/roster"
+              className="btn btn-primary template-create-split__featured"
+            >
+              Générer depuis un roster
+            </Link>
+            <Link
+              href="/dashboard/templates/new/manual"
+              className="btn btn-secondary"
+            >
+              Manuel
+            </Link>
+            <Link
+              href="/dashboard/templates/new"
+              className="btn btn-ghost btn-small template-create-split__more"
+            >
+              Tous les modes
+            </Link>
+          </div>
         }
       />
 
@@ -35,11 +61,17 @@ export default async function TemplatesPage() {
             Créez un modèle ou initialisez depuis le bot.{" "}
             {guilds.length === 0 ? (
               <>
-                Aucun serveur en base : invitez le bot et utilisez un slash une
-                fois.
+                Aucun serveur en base : commencez par inviter le bot (voir
+                ci-dessous).
               </>
             ) : null}
           </p>
+          {guilds.length === 0 ? (
+            <DiscordInviteCta
+              inviteUrl={discordInviteUrl}
+              installRedirectUri={installRedirectUri}
+            />
+          ) : null}
           {guilds.length > 0 ? (
             <div className="btn-row" style={{ marginTop: "0.75rem" }}>
               <Link href="/dashboard/templates/new" className="btn btn-secondary">
@@ -64,9 +96,17 @@ export default async function TemplatesPage() {
               <article key={t.id} className="template-card template-card--premium">
                 <div className="template-card__head">
                   <h2 className="template-card__title">{t.name}</h2>
-                  {t.isDefault ? (
-                    <span className="badge default">Par défaut</span>
-                  ) : null}
+                  <div className="template-card__badges">
+                    {t.isDefault ? (
+                      <span className="badge default">Par défaut</span>
+                    ) : null}
+                    {t.creationSource ===
+                    TemplateCreationSource.ROSTER_GENERATED ? (
+                      <span className="badge badge--roster-src">
+                        Depuis roster
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 {t.description ? (
                   <p className="template-card__desc muted">{t.description}</p>

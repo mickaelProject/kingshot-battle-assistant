@@ -1,4 +1,8 @@
-import { type BattlePhaseType, Prisma } from "@prisma/client";
+import {
+  type BattlePhaseType,
+  TemplateCreationSource,
+  Prisma,
+} from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -15,9 +19,15 @@ function isMissingEventDurationColumn(e: unknown): boolean {
   );
 }
 
+function p2022Blob(e: unknown): string {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError)) return "";
+  return `${e.message}${JSON.stringify(e.meta ?? {})}`;
+}
+
 /** Mutable pour compatibilité avec les types `orderBy` Prisma (pas `readonly[]`). */
 const eventsOrderPhases: Prisma.BattleEventDefinitionOrderByWithRelationInput[] = [
   { offsetSeconds: "asc" },
+  { timelineScope: "asc" },
   { orderIndex: "asc" },
 ];
 
@@ -78,55 +88,83 @@ export type TemplateRowForTemplatesPage = {
   guildId: string;
   eventDurationMinutes: number;
   isDefault: boolean;
+  creationSource: TemplateCreationSource;
   guild: { id: string };
   events: { offsetSeconds: number; phaseType: BattlePhaseType; title: string }[];
 };
 
-export async function fetchBattleTemplatesForTemplatesPage(): Promise<
-  TemplateRowForTemplatesPage[]
-> {
-  const selectWith = {
+function buildTemplatesListSelect(flags: {
+  eventDurationMinutes: boolean;
+  creationSource: boolean;
+}): Prisma.BattleTemplateSelect {
+  return {
     id: true,
     name: true,
     description: true,
     guildId: true,
-    eventDurationMinutes: true,
     isDefault: true,
+    ...(flags.eventDurationMinutes ? { eventDurationMinutes: true } : {}),
+    ...(flags.creationSource ? { creationSource: true } : {}),
     guild: { select: { id: true } },
     events: {
       orderBy: eventsOrderPhases,
       select: { offsetSeconds: true, phaseType: true, title: true },
     },
   };
+}
 
-  try {
-    const rows = await prisma.battleTemplate.findMany({
-      orderBy: [{ guildId: "asc" }, { name: "asc" }],
-      select: selectWith,
-    });
-    return rows as unknown as TemplateRowForTemplatesPage[];
-  } catch (e) {
-    if (!isMissingEventDurationColumn(e)) throw e;
-    const rows = await prisma.battleTemplate.findMany({
-      orderBy: [{ guildId: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        guildId: true,
-        isDefault: true,
-        guild: { select: { id: true } },
-        events: {
-          orderBy: eventsOrderPhases,
-          select: { offsetSeconds: true, phaseType: true, title: true },
-        },
-      },
-    });
-    return rows.map((r) => ({
-      ...r,
-      eventDurationMinutes: 60,
-    })) as unknown as TemplateRowForTemplatesPage[];
+export async function fetchBattleTemplatesForTemplatesPage(): Promise<
+  TemplateRowForTemplatesPage[]
+> {
+  let eventDurationMinutes = true;
+  let creationSource = true;
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      const rows = await prisma.battleTemplate.findMany({
+        orderBy: [{ guildId: "asc" }, { name: "asc" }],
+        select: buildTemplatesListSelect({
+          eventDurationMinutes,
+          creationSource,
+        }),
+      });
+      return rows.map((r) => {
+        const rec = r as Record<string, unknown>;
+        return {
+          ...r,
+          eventDurationMinutes:
+            typeof rec.eventDurationMinutes === "number"
+              ? rec.eventDurationMinutes
+              : 60,
+          creationSource:
+            rec.creationSource === TemplateCreationSource.ROSTER_GENERATED ||
+            rec.creationSource === TemplateCreationSource.MANUAL
+              ? (rec.creationSource as TemplateCreationSource)
+              : TemplateCreationSource.MANUAL,
+        };
+      }) as TemplateRowForTemplatesPage[];
+    } catch (e) {
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError)) throw e;
+      if (e.code !== "P2022") throw e;
+      const blob = p2022Blob(e);
+      if (/creationSource/i.test(blob)) {
+        creationSource = false;
+        continue;
+      }
+      if (/eventDurationMinutes/i.test(blob)) {
+        eventDurationMinutes = false;
+        continue;
+      }
+      if (isMissingEventDurationColumn(e)) {
+        eventDurationMinutes = false;
+        continue;
+      }
+      throw e;
+    }
   }
+  throw new Error(
+    "[kingshot] Impossible de charger les modèles : migrations Prisma incomplètes.",
+  );
 }
 
 const selectTemplateForEditBase = {
@@ -137,6 +175,7 @@ const selectTemplateForEditBase = {
   isDefault: true,
   createdAt: true,
   updatedAt: true,
+  eventProductKey: true,
   events: { orderBy: eventsOrderPhases },
 } as const;
 
@@ -188,6 +227,8 @@ const selectTemplateForDuplicateBase = {
   guildId: true,
   name: true,
   description: true,
+  creationSource: true,
+  eventProductKey: true,
   events: { orderBy: eventsOrderPhases },
 } as const;
 

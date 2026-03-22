@@ -1,9 +1,13 @@
 import {
-  fetchGuildTextChannels,
+  fetchGuildTextChannelOptionsByGuildId,
   hasDiscordBotToken,
 } from "@/lib/discord-rest";
 import { fetchBattleTemplatesForEventsWizard } from "@/lib/battle-templates-queries";
 import { prisma } from "@/lib/prisma";
+import {
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
 import {
   formatOffsetLabel,
   templateDurationSeconds,
@@ -27,15 +31,19 @@ export default async function EventsPage({
   }>;
 }) {
   const sp = await searchParams;
-  const guilds = await prisma.guildSettings.findMany({
-    orderBy: { discordGuildId: "asc" },
-    select: {
-      id: true,
-      discordGuildId: true,
-      battleChannelId: true,
-    },
-  });
-  const templates = await fetchBattleTemplatesForEventsWizard();
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const discordInstallRedirectUri = getDiscordInstallRedirectUri();
+  const [guilds, templates] = await Promise.all([
+    prisma.guildSettings.findMany({
+      orderBy: { discordGuildId: "asc" },
+      select: {
+        id: true,
+        discordGuildId: true,
+        battleChannelId: true,
+      },
+    }),
+    fetchBattleTemplatesForEventsWizard(),
+  ]);
 
   const templatesMeta: Record<
     string,
@@ -65,11 +73,9 @@ export default async function EventsPage({
     return { id: t.id, name: t.name, guildId: t.guildId };
   });
 
-  const channelsByGuildId: Record<string, { id: string; name: string }[]> = {};
-  for (const g of guilds) {
-    const raw = await fetchGuildTextChannels(g.discordGuildId);
-    channelsByGuildId[g.id] = raw.map((c) => ({ id: c.id, name: c.name }));
-  }
+  const channelMap = await fetchGuildTextChannelOptionsByGuildId(guilds);
+  const channelsByGuildId: Record<string, { id: string; name: string }[]> =
+    Object.fromEntries(channelMap);
 
   return (
     <EventsWizard
@@ -79,6 +85,8 @@ export default async function EventsPage({
       templatesPhasePreview={templatesPhasePreview}
       channelsByGuildId={channelsByGuildId}
       discordConfigured={hasDiscordBotToken()}
+      discordInviteUrl={discordInviteUrl}
+      discordInstallRedirectUri={discordInstallRedirectUri}
       initialTemplateId={sp.templateId}
       initialGuildSettingsId={sp.guildId}
       scheduleMode={sp.mode === "schedule"}

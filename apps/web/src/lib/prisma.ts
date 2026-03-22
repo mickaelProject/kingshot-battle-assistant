@@ -41,10 +41,11 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
-if (process.env.NODE_ENV === "production") {
-  void prisma.$connect().then(
-    () => console.log("[kingshot:web] Prisma connecté à PostgreSQL."),
-    (err) =>
-      console.error("[kingshot:web] Prisma $connect a échoué :", err),
-  );
-}
+void prisma.$connect().then(
+  () => {
+    if (process.env.NODE_ENV === "production") {
+      console.log("[kingshot:web] Prisma connecté à PostgreSQL.");
+    }
+  },
+  (err) => console.error("[kingshot:web] Prisma $connect a échoué :", err),
+);

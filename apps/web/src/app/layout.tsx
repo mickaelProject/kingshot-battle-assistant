@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kingshot · Battle admin",
-  description: "Event manager for Kingshot battle assistant",
+  title: "Kingshot · Bataille & admin",
+  description:
+    "Assistant d’événements : tableau de bord admin et vue joueur en direct.",
 };
 
 export default function RootLayout({

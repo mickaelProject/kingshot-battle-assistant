@@ -8,7 +8,9 @@ import {
   type ManagedRunActionResult,
 } from "@/actions/data";
 import { formatDurationHuman } from "@/lib/time-human";
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 
 type Guild = {
   id: string;
@@ -32,6 +34,8 @@ export function EventsWizard({
   templatesPhasePreview,
   channelsByGuildId,
   discordConfigured,
+  discordInviteUrl,
+  discordInstallRedirectUri,
   initialTemplateId,
   initialGuildSettingsId,
   scheduleMode,
@@ -52,6 +56,8 @@ export function EventsWizard({
   >;
   channelsByGuildId: Record<string, ChannelOpt[]>;
   discordConfigured: boolean;
+  discordInviteUrl: string | null;
+  discordInstallRedirectUri: string | null;
   initialTemplateId?: string;
   initialGuildSettingsId?: string;
   scheduleMode: boolean;
@@ -146,9 +152,17 @@ export function EventsWizard({
       <div className="dashboard-main">
         <PageHeader
           title="Événements"
-          description="Aucun serveur Discord n’est encore relié."
+          description="Aucun serveur Discord n’est encore relié à cette base."
         />
-        <p className="muted">Invite le bot sur ton serveur pour commencer.</p>
+        <SectionCard
+          title="Relier un serveur"
+          subtitle="Invitez le bot, puis utilisez une commande slash en tant qu’administrateur."
+        >
+          <DiscordInviteCta
+            inviteUrl={discordInviteUrl}
+            installRedirectUri={discordInstallRedirectUri}
+          />
+        </SectionCard>
       </div>
     );
   }

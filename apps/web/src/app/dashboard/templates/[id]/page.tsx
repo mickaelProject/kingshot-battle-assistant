@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { duplicateTemplateAction } from "@/actions/data";
 import { PhaseTimeline } from "@/components/phase-timeline";
+import { TemplateDeleteBlock } from "@/components/template-delete-block";
 import { TacticalPhasePreview } from "@/components/tactical-phase-preview";
 import { fetchBattleTemplateForDetail } from "@/lib/battle-templates-queries";
 import { templateDurationSeconds } from "@/lib/time-human";
@@ -56,6 +57,19 @@ export default async function TemplateDetailPage({
           Éditer modèle & phases
         </Link>
       </p>
+
+      <div className="card" style={{ marginTop: "1.25rem", padding: "1rem 1.25rem" }}>
+        <h2 style={{ marginTop: 0, fontSize: "1rem" }}>Zone sensible</h2>
+        <p className="muted" style={{ marginBottom: "0.75rem" }}>
+          Supprimer ce modèle depuis l’aperçu ou l’éditeur — même règles (sessions /
+          runs actifs bloquent la suppression).
+        </p>
+        <TemplateDeleteBlock
+          templateId={template.id}
+          templateName={template.name}
+          errorReturnTo={`/dashboard/templates/${id}`}
+        />
+      </div>
 
       <h2>Timeline</h2>
       <div className="card">

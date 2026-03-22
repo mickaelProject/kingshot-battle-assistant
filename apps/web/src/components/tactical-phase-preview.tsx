@@ -9,6 +9,7 @@ export function TacticalPhasePreview({
   objective,
   action,
   nextHint,
+  customDiscordText,
   compact,
   showMessageChrome = true,
 }: {
@@ -17,6 +18,8 @@ export function TacticalPhasePreview({
   objective?: string;
   action?: string;
   nextHint?: string;
+  /** Si renseigné, remplace tout le corps de l’aperçu par ce texte (message Discord final). */
+  customDiscordText?: string | null;
   compact?: boolean;
   /** Enveloppe type fil Discord (avatar + pseudo) — désactiver si déjà dans un mock externe. */
   showMessageChrome?: boolean;
@@ -26,8 +29,27 @@ export function TacticalPhasePreview({
   const obj = objective?.trim();
   const act = action?.trim();
   const next = nextHint?.trim();
+  const custom = customDiscordText?.trim();
 
-  const embed = (
+  const embed = custom ? (
+    <aside
+      className={`discord-embed-preview ${compact ? "discord-embed-preview--compact" : ""}`}
+      style={{ borderLeftColor: ui.color }}
+      aria-label="Aperçu embed Discord"
+    >
+      <div className="discord-embed-preview__author">
+        <span aria-hidden>{ui.ribbon}</span>
+        {ui.label}
+      </div>
+      <div className="discord-embed-preview__title">Message personnalisé</div>
+      <div className="discord-embed-preview__body discord-embed-preview__body--pre">
+        <pre className="discord-embed-preview__pre">{custom}</pre>
+      </div>
+      <div className="discord-embed-preview__footer">
+        Kingshot Battle Assistant · aperçu admin
+      </div>
+    </aside>
+  ) : (
     <aside
       className={`discord-embed-preview ${compact ? "discord-embed-preview--compact" : ""}`}
       style={{ borderLeftColor: ui.color }}
@@ -40,24 +62,30 @@ export function TacticalPhasePreview({
       <div className="discord-embed-preview__title">{head}</div>
       <div className="discord-embed-preview__body">
         {obj ? (
-          <p>
-            <strong>Objectif</strong>
+          <p className="discord-embed-preview__section">
+            <strong className="discord-embed-preview__section-title">
+              🎯 Objectif
+            </strong>
             <br />
-            {obj}
+            <span className="discord-embed-preview__section-body">{obj}</span>
           </p>
         ) : null}
         {act ? (
-          <p>
-            <strong>Action</strong>
+          <p className="discord-embed-preview__section">
+            <strong className="discord-embed-preview__section-title">
+              ⚡ Action
+            </strong>
             <br />
-            {act}
+            <span className="discord-embed-preview__section-body">{act}</span>
           </p>
         ) : null}
         {next ? (
-          <p>
-            <strong>Prochain pas</strong>
+          <p className="discord-embed-preview__section">
+            <strong className="discord-embed-preview__section-title">
+              ⏭️ Prochain pas
+            </strong>
             <br />
-            {next}
+            <span className="discord-embed-preview__section-body">{next}</span>
           </p>
         ) : null}
         {!obj && !act && !next ? (

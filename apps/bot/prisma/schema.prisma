@@ -25,14 +25,23 @@ model GuildSettings {
   @@index([discordGuildId])
 }
 
+enum TemplateCreationSource {
+  MANUAL
+  ROSTER_GENERATED
+}
+
 /// Named battle timeline (phases for event manager + Discord).
 model BattleTemplate {
   id          String   @id @default(cuid())
   guildId     String
   name        String
   description String?
+  /// Clé produit (event-intelligence) : swordland, kvk, mobilization, etc.
+  eventProductKey String?
   /// Durée réelle de l’événement en jeu (brief → fin), distincte de la timeline d’annonces Discord.
   eventDurationMinutes Int @default(60)
+  /// Manuel vs brouillon généré depuis un roster (badge UI + traçabilité).
+  creationSource TemplateCreationSource @default(MANUAL)
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -59,10 +68,20 @@ model BattleEventDefinition {
   action        String          @default("")
   nextHint      String          @default("")
   orderIndex    Int             @default(0)
+  /// GLOBAL = posté sur Discord par le bot ; légions = fiches tactiques éditables.
+  timelineScope TimelineScope @default(GLOBAL)
+  targetedBuildings Json?
+  assignedLeaders   Json?
+  assignedPlayers   Json?
+  /// Si renseigné, remplace le rendu auto dans l’aperçu / message final.
+  customDiscordText      String?
+  /// Brouillon Discord généré (pour « Restaurer le message généré »).
+  generatedDiscordDraft  String?
 
   template BattleTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   @@index([templateId])
+  @@index([templateId, timelineScope])
 }
 
 enum BattlePhaseType {
@@ -70,6 +89,13 @@ enum BattlePhaseType {
   OBJECTIVE
   REMINDER
   FINAL
+}
+
+/// Portée de la phase : annonces Discord = GLOBAL uniquement (Légions = planification / export).
+enum TimelineScope {
+  GLOBAL
+  LEGION_1
+  LEGION_2
 }
 
 /// At most one ACTIVE row per guild — enforced by partial unique index (see migrations).
@@ -183,6 +209,14 @@ model PlayerAssignment {
   sessionId String?
   slotLabel String
   userId    String
+  /// Légion (1-based), optionnel — vue joueur / ORBAT.
+  legionIndex Int?
+  /// west | east (ou libre), optionnel.
+  side        String?
+  /// Clé bâtiment produit (ex. bell_tower, sanctum1), optionnel.
+  buildingKey String?
+  /// Nom affichable du leader de groupe (optionnel).
+  leaderName  String?
   createdAt DateTime @default(now())
 
   guild   GuildSettings  @relation(fields: [guildId], references: [id], onDelete: Cascade)

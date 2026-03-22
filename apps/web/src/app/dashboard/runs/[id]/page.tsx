@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RunActiveControls } from "@/components/run-active-controls";
 import { RunMissionStrip } from "@/components/run-mission-strip";
+import { RunPlayerLiveLink } from "@/components/run-player-live-link";
 import { RunVerticalTimeline } from "@/components/run-vertical-timeline";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -145,6 +146,13 @@ export default async function RunDetailPage({
                 <p>{run.errorMessage}</p>
               </div>
             ) : null}
+          </SectionCard>
+
+          <SectionCard
+            title="Vue joueur (lien)"
+            subtitle="Hors /dashboard — écran minimal pour l’équipe."
+          >
+            <RunPlayerLiveLink runId={run.id} />
           </SectionCard>
 
           <SectionCard

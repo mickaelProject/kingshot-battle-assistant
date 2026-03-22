@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 const COOKIE = "ks_admin";
 
@@ -36,7 +37,7 @@ export async function logout(): Promise<void> {
   jar.delete(COOKIE);
 }
 
-export async function isAdminAuthenticated(): Promise<boolean> {
+const readAdminCookieAuth = cache(async (): Promise<boolean> => {
   const secret = process.env.ADMIN_PANEL_SECRET;
   if (!secret) return false;
   const jar = await cookies();
@@ -49,6 +50,11 @@ export async function isAdminAuthenticated(): Promise<boolean> {
   } catch {
     return false;
   }
+});
+
+/** Une seule lecture cookie / comparaison par rendu RSC (layout + pages). */
+export async function isAdminAuthenticated(): Promise<boolean> {
+  return readAdminCookieAuth();
 }
 
 export async function requireAdmin(): Promise<void> {

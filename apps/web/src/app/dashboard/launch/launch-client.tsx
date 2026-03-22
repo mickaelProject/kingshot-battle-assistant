@@ -6,6 +6,8 @@ import {
   createManagedRunAction,
   type ManagedRunActionResult,
 } from "@/actions/data";
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
+import { SectionCard } from "@/components/ui/section-card";
 
 type Guild = {
   id: string;
@@ -20,11 +22,15 @@ export function LaunchClient({
   templates,
   channelsByGuildId,
   discordConfigured,
+  discordInviteUrl,
+  discordInstallRedirectUri,
 }: {
   guilds: Guild[];
   templates: Template[];
   channelsByGuildId: Record<string, ChannelOpt[]>;
   discordConfigured: boolean;
+  discordInviteUrl: string | null;
+  discordInstallRedirectUri: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -64,12 +70,18 @@ export function LaunchClient({
 
   if (guilds.length === 0) {
     return (
-      <main>
+      <div className="dashboard-main">
         <h1>Lancer un événement</h1>
-        <div className="card">
-          <p>Aucune guilde en base.</p>
-        </div>
-      </main>
+        <p className="muted">
+          Aucune guilde en base — ajoutez d’abord le bot sur votre serveur Discord.
+        </p>
+        <SectionCard title="Inviter le bot">
+          <DiscordInviteCta
+            inviteUrl={discordInviteUrl}
+            installRedirectUri={discordInstallRedirectUri}
+          />
+        </SectionCard>
+      </div>
     );
   }
 

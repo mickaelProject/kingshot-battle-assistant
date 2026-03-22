@@ -1,13 +1,26 @@
+import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import {
-  fetchGuildTextChannels,
+  fetchGuildTextChannelOptionsByGuildId,
   hasDiscordBotToken,
 } from "@/lib/discord-rest";
+import {
+  getDiscordBotInviteUrl,
+  getDiscordInstallRedirectUri,
+} from "@/lib/discord-invite";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { ServerSettingsCard } from "@/components/server-settings-card";
 import { prisma } from "@/lib/prisma";
 
-export default async function ServerSettingsPage() {
+export default async function ServerSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ code?: string; guild_id?: string }>;
+}) {
+  const sp = await searchParams;
+  const fromDiscordInstall = Boolean(sp.code);
+  const discordInviteUrl = getDiscordBotInviteUrl();
+  const installRedirectUri = getDiscordInstallRedirectUri();
   const guilds = await prisma.guildSettings.findMany({
     orderBy: { discordGuildId: "asc" },
     include: {
@@ -16,14 +29,7 @@ export default async function ServerSettingsPage() {
   });
 
   const discordConfigured = hasDiscordBotToken();
-  const channelsByGuild = new Map<string, { id: string; name: string }[]>();
-  for (const g of guilds) {
-    const raw = await fetchGuildTextChannels(g.discordGuildId);
-    channelsByGuild.set(
-      g.id,
-      raw.map((c) => ({ id: c.id, name: c.name })),
-    );
-  }
+  const channelsByGuild = await fetchGuildTextChannelOptionsByGuildId(guilds);
 
   return (
     <div className="dashboard-main">
@@ -32,12 +38,43 @@ export default async function ServerSettingsPage() {
         description="Salon des annonces et modèle proposé par défaut — tout ce dont vos officiers ont besoin au quotidien."
       />
 
-      {guilds.length === 0 ? (
-        <SectionCard title="Aucun serveur">
+      {fromDiscordInstall ? (
+        <div
+          className="discord-oauth-return-banner"
+          role="status"
+        >
+          <strong>Bot autorisé sur Discord</strong>
           <p className="muted">
-            Invite le bot sur ton Discord et utilise une commande slash une fois
-            pour créer la fiche serveur.
+            Si votre serveur n’apparaît pas encore, utilisez une commande slash du
+            bot (ex. <code>/setup channel</code>) en tant qu’administrateur Discord,
+            puis actualisez cette page.
           </p>
+        </div>
+      ) : null}
+
+      {guilds.length === 0 ? (
+        <SectionCard
+          title="Relier votre serveur Discord"
+          subtitle="Sans serveur enregistré, les modèles et événements ne peuvent pas cibler un salon."
+        >
+          <p className="muted">
+            Le tableau de bord lit la <strong>même base PostgreSQL</strong> que
+            le bot (<code>DATABASE_URL</code> identique dans{" "}
+            <code>apps/web/.env</code> et <code>apps/bot/.env</code>). Dès que le
+            bot rejoint un serveur (version à jour du code), la guilde est
+            enregistrée automatiquement — actualisez cette page.
+          </p>
+          <p className="muted server-empty-hint">
+            Si le serveur n’apparaît toujours pas : redémarrez le processus du
+            bot, ou en tant qu’<strong>administrateur Discord</strong> exécutez{" "}
+            <code>/setup channel</code> (salon des annonces) une fois, puis
+            actualisez. Vérifiez aussi que les commandes slash sont enregistrées
+            : <code>npm run commands:register -w @kingshot/bot</code>.
+          </p>
+          <DiscordInviteCta
+            inviteUrl={discordInviteUrl}
+            installRedirectUri={installRedirectUri}
+          />
         </SectionCard>
       ) : (
         <>

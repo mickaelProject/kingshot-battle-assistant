@@ -40,7 +40,10 @@ export async function startBattleForGuild(params: {
     return { ok: false, reason: "GUILD_MISMATCH" };
   }
 
-  const events = sortTemplateEventsByOffset(template.events);
+  const discordEvents = template.events.filter(
+    (e) => e.timelineScope === "GLOBAL",
+  );
+  const events = sortTemplateEventsByOffset(discordEvents);
   if (events.length === 0) {
     return { ok: false, reason: "NO_PHASES" };
   }

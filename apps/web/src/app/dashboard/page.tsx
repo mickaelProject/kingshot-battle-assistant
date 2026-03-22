@@ -9,7 +9,7 @@ import { SectionCard } from "@/components/ui/section-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
-  fetchGuildTextChannels,
+  fetchGuildTextChannelOptionsByGuildId,
   hasDiscordBotToken,
 } from "@/lib/discord-rest";
 import {
@@ -87,7 +87,6 @@ export default async function OverviewPage() {
       orderBy: { discordGuildId: "asc" },
       include: {
         defaultTemplate: { select: { name: true, id: true } },
-        templates: { select: { id: true } },
       },
     }),
     prisma.battleTemplate.count(),
@@ -109,12 +108,15 @@ export default async function OverviewPage() {
     templateName: log.run.template?.name ?? null,
   }));
 
+  const channelOptionsByGuild =
+    botOk && guilds.length > 0
+      ? await fetchGuildTextChannelOptionsByGuildId(guilds)
+      : new Map<string, { id: string; name: string }[]>();
   const channelNameByGuild = new Map<string, Map<string, string>>();
   if (botOk) {
     for (const g of guilds) {
-      const chans = await fetchGuildTextChannels(g.discordGuildId);
-      const m = new Map(chans.map((c) => [c.id, c.name]));
-      channelNameByGuild.set(g.id, m);
+      const opts = channelOptionsByGuild.get(g.id) ?? [];
+      channelNameByGuild.set(g.id, new Map(opts.map((c) => [c.id, c.name])));
     }
   }
 

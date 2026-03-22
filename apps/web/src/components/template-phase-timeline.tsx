@@ -27,14 +27,25 @@ function phaseAccent(phaseType: string): { color: string; ribbon: string } {
   return { color: u.color, ribbon: u.ribbon };
 }
 
+function sortPhasesForTimeline(a: EditorPhase, b: EditorPhase): number {
+  return (
+    a.offsetSeconds - b.offsetSeconds ||
+    a.orderIndex - b.orderIndex ||
+    a.key.localeCompare(b.key)
+  );
+}
+
 export function TemplatePhaseTimeline({
   phases,
   templateId,
+  timelineScope,
   selectedId,
   onSelectPhase,
 }: {
   phases: EditorPhase[];
   templateId: string;
+  /** Portée réordonnée (GLOBAL / légion) — doit correspondre aux phases affichées. */
+  timelineScope: string;
   selectedId: string | null;
   onSelectPhase: (id: string) => void;
 }) {
@@ -50,11 +61,7 @@ export function TemplatePhaseTimeline({
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sorted = useMemo(
-    () =>
-      [...phases].sort(
-        (a, b) =>
-          a.offsetSeconds - b.offsetSeconds || a.key.localeCompare(b.key),
-      ),
+    () => [...phases].sort(sortPhasesForTimeline),
     [phases],
   );
 
@@ -62,6 +69,7 @@ export function TemplatePhaseTimeline({
     (orderedIds: string[]) => {
       const fd = new FormData();
       fd.set("templateId", templateId);
+      fd.set("timelineScope", timelineScope);
       for (const id of orderedIds) {
         fd.append("phaseId", id);
       }
@@ -70,7 +78,7 @@ export function TemplatePhaseTimeline({
         if (r.ok) router.refresh();
       });
     },
-    [router, templateId],
+    [router, templateId, timelineScope],
   );
 
   const clearTimers = () => {
@@ -287,6 +295,7 @@ export function TemplatePhaseTimeline({
                       objective={p.objective}
                       action={p.action}
                       nextHint={p.nextHint}
+                      customDiscordText={p.customDiscordText}
                       compact
                       showMessageChrome={false}
                     />

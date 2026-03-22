@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { BattlePhaseType } from "@prisma/client";
+import { BattlePhaseType, TemplateCreationSource } from "@prisma/client";
+import type { TimelineScope } from "@/lib/timeline-scope";
+import { TIMELINE_SCOPES } from "@/lib/timeline-scope";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { fetchBattleTemplateForDuplicate } from "@/lib/battle-templates-queries";
@@ -20,6 +22,19 @@ function parsePhase(s: string): BattlePhaseType | null {
   return PHASES.includes(s as BattlePhaseType) ? (s as BattlePhaseType) : null;
 }
 
+function parseTimelineScope(raw: string): TimelineScope {
+  return TIMELINE_SCOPES.includes(raw as TimelineScope)
+    ? (raw as TimelineScope)
+    : "GLOBAL";
+}
+
+function linesToStringArray(raw: string): string[] {
+  return raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export async function createTemplateAction(formData: FormData) {
   await requireAdmin();
   const guildId = String(formData.get("guildId") ?? "");
@@ -35,6 +50,7 @@ export async function createTemplateAction(formData: FormData) {
       name,
       description: description || undefined,
       eventDurationMinutes,
+      creationSource: TemplateCreationSource.MANUAL,
     },
   });
   revalidatePath("/dashboard/templates");
@@ -66,15 +82,76 @@ export async function updateTemplateMetaAction(formData: FormData) {
 export async function deleteTemplateAction(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
+  const errorReturnTo = String(
+    formData.get("errorReturnTo") ?? "",
+  ).trim();
   if (!id) return;
+
+  const template = await prisma.battleTemplate.findUnique({
+    where: { id },
+    select: { id: true, name: true },
+  });
+  const editUrl =
+    errorReturnTo ||
+    `/dashboard/templates/${id}/edit`;
+
+  if (!template) {
+    redirect(
+      `/dashboard/templates?toast=error&toastMsg=${encodeURIComponent("Modèle introuvable.")}`,
+    );
+  }
+
+  const [
+    activeSessions,
+    scheduledOrLiveRuns,
+    sessionTotal,
+    runTotal,
+  ] = await Promise.all([
+    prisma.battleSession.count({
+      where: { templateId: id, status: "ACTIVE" },
+    }),
+    prisma.managedEventRun.count({
+      where: {
+        templateId: id,
+        status: { in: ["SCHEDULED", "STARTING", "ACTIVE"] },
+      },
+    }),
+    prisma.battleSession.count({ where: { templateId: id } }),
+    prisma.managedEventRun.count({ where: { templateId: id } }),
+  ]);
+
+  if (activeSessions > 0 || scheduledOrLiveRuns > 0) {
+    redirect(
+      `${editUrl}?toast=error&toastMsg=${encodeURIComponent(
+        "Suppression impossible : ce modèle est lié à une bataille en cours ou à un lancement planifié / actif.",
+      )}`,
+    );
+  }
+
+  if (sessionTotal > 0 || runTotal > 0) {
+    redirect(
+      `${editUrl}?toast=error&toastMsg=${encodeURIComponent(
+        "Suppression impossible : ce modèle est encore référencé par l’historique des batailles ou des lancements (contrainte base de données).",
+      )}`,
+    );
+  }
+
   try {
     await prisma.battleTemplate.delete({ where: { id } });
   } catch {
-    /* FK / in use */
+    redirect(
+      `${editUrl}?toast=error&toastMsg=${encodeURIComponent(
+        "Suppression impossible : le modèle est encore utilisé (référence externe).",
+      )}`,
+    );
   }
+
   revalidatePath("/dashboard/templates");
+  revalidatePath("/dashboard");
   redirect(
-    `/dashboard/templates?toast=saved&toastMsg=${encodeURIComponent("Modèle supprimé.")}`,
+    `/dashboard/templates?toast=saved&toastMsg=${encodeURIComponent(
+      `Modèle « ${template.name} » supprimé.`,
+    )}`,
   );
 }
 
@@ -101,6 +178,8 @@ export async function duplicateTemplateAction(formData: FormData) {
       name,
       description: src.description,
       eventDurationMinutes: src.eventDurationMinutes,
+      creationSource: src.creationSource,
+      eventProductKey: src.eventProductKey ?? undefined,
       isDefault: false,
       events: {
         create: src.events.map((e) => ({
@@ -112,6 +191,12 @@ export async function duplicateTemplateAction(formData: FormData) {
           action: e.action,
           nextHint: e.nextHint,
           orderIndex: e.orderIndex,
+          timelineScope: e.timelineScope,
+          targetedBuildings: e.targetedBuildings ?? undefined,
+          assignedLeaders: e.assignedLeaders ?? undefined,
+          assignedPlayers: e.assignedPlayers ?? undefined,
+          customDiscordText: e.customDiscordText ?? undefined,
+          generatedDiscordDraft: e.generatedDiscordDraft ?? undefined,
         })),
       },
     },
@@ -138,8 +223,12 @@ export async function addPhaseAction(formData: FormData) {
   const phaseType = parsePhase(phaseTypeRaw);
   if (!templateId || !Number.isInteger(offsetSeconds) || offsetSeconds < 0 || !phaseType || !title) return;
 
+  const timelineScope = parseTimelineScope(
+    String(formData.get("timelineScope") ?? "GLOBAL"),
+  );
+
   const maxOrder = await prisma.battleEventDefinition.aggregate({
-    where: { templateId },
+    where: { templateId, timelineScope },
     _max: { orderIndex: true },
   });
   const orderIndex = (maxOrder._max.orderIndex ?? -1) + 1;
@@ -155,6 +244,10 @@ export async function addPhaseAction(formData: FormData) {
       action,
       nextHint,
       orderIndex,
+      timelineScope,
+      targetedBuildings: [],
+      assignedLeaders: [],
+      assignedPlayers: [],
     },
   });
   revalidatePath(`/dashboard/templates/${templateId}`);
@@ -178,6 +271,21 @@ export async function updatePhaseAction(formData: FormData) {
   const phaseType = parsePhase(phaseTypeRaw);
   if (!id || !templateId || !key || !Number.isInteger(offsetSeconds) || offsetSeconds < 0 || !phaseType || !title) return;
 
+  const timelineScope = parseTimelineScope(
+    String(formData.get("timelineScope") ?? "GLOBAL"),
+  );
+  const targetedBuildings = linesToStringArray(
+    String(formData.get("targetedBuildings") ?? ""),
+  );
+  const assignedLeaders = linesToStringArray(
+    String(formData.get("assignedLeaders") ?? ""),
+  );
+  const assignedPlayers = linesToStringArray(
+    String(formData.get("assignedPlayers") ?? ""),
+  );
+  const customDiscordRaw = String(formData.get("customDiscordText") ?? "");
+  const customDiscordText = customDiscordRaw.trim() ? customDiscordRaw : null;
+
   await prisma.battleEventDefinition.update({
     where: { id },
     data: {
@@ -188,6 +296,11 @@ export async function updatePhaseAction(formData: FormData) {
       objective,
       action,
       nextHint,
+      timelineScope,
+      targetedBuildings,
+      assignedLeaders,
+      assignedPlayers,
+      customDiscordText,
     },
   });
   revalidatePath(`/dashboard/templates/${templateId}`);
@@ -246,55 +359,83 @@ export async function movePhaseAction(formData: FormData) {
 }
 
 /**
- * Réordonne toutes les phases du modèle : réassigne les `offsetSeconds` dans l’ordre
- * chronologique précédent (multiset conservé) et `orderIndex` 0..n-1.
+ * Réordonne les phases d’une portée (`timelineScope`) : `orderIndex` 0..n-1 uniquement
+ * (plusieurs phases peuvent partager le même T+ entre portées différentes).
  */
 export async function reorderTemplatePhasesAction(formData: FormData) {
   await requireAdmin();
   const templateId = String(formData.get("templateId") ?? "");
   const ids = formData.getAll("phaseId").map(String).filter(Boolean);
+  const timelineScope = parseTimelineScope(
+    String(formData.get("timelineScope") ?? "GLOBAL"),
+  );
   if (!templateId || ids.length === 0) {
     return { ok: false as const, error: "Données invalides." };
   }
 
-  const all = await prisma.battleEventDefinition.findMany({
-    where: { templateId },
+  const allInScope = await prisma.battleEventDefinition.findMany({
+    where: { templateId, timelineScope },
     orderBy: [{ offsetSeconds: "asc" }, { orderIndex: "asc" }],
   });
-  if (ids.length !== all.length) {
+  if (ids.length !== allInScope.length) {
     return { ok: false as const, error: "Liste de phases incomplète." };
   }
   if (new Set(ids).size !== ids.length) {
     return { ok: false as const, error: "Liste de phases invalide." };
   }
-  const idSet = new Set(all.map((e) => e.id));
+  const idSet = new Set(allInScope.map((e) => e.id));
   for (const id of ids) {
     if (!idSet.has(id)) {
-      return { ok: false as const, error: "Phase inconnue." };
+      return { ok: false as const, error: "Phase inconnue ou mauvaise portée." };
     }
   }
 
-  const sortedOffsets = [...all]
-    .sort(
-      (a, b) =>
-        a.offsetSeconds - b.offsetSeconds || a.orderIndex - b.orderIndex,
-    )
-    .map((e) => e.offsetSeconds);
-
   await prisma.$transaction(
-    ids.map((id, i) =>
+    ids.map((phaseId, i) =>
       prisma.battleEventDefinition.update({
-        where: { id },
-        data: {
-          offsetSeconds: sortedOffsets[i]!,
-          orderIndex: i,
-        },
+        where: { id: phaseId },
+        data: { orderIndex: i },
       }),
     ),
   );
   revalidatePath(`/dashboard/templates/${templateId}/edit`);
   revalidatePath(`/dashboard/templates/${templateId}`);
   return { ok: true as const };
+}
+
+export async function restorePhaseDiscordDraftAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const templateId = String(formData.get("templateId") ?? "");
+  if (!id || !templateId) return;
+  const row = await prisma.battleEventDefinition.findUnique({
+    where: { id },
+    select: { generatedDiscordDraft: true },
+  });
+  const draft = row?.generatedDiscordDraft?.trim();
+  await prisma.battleEventDefinition.update({
+    where: { id },
+    data: { customDiscordText: draft?.length ? draft : null },
+  });
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  redirect(
+    `/dashboard/templates/${templateId}/edit?toast=saved&toastMsg=${encodeURIComponent("Message Discord : brouillon généré restauré.")}`,
+  );
+}
+
+export async function clearPhaseDiscordOverrideAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const templateId = String(formData.get("templateId") ?? "");
+  if (!id || !templateId) return;
+  await prisma.battleEventDefinition.update({
+    where: { id },
+    data: { customDiscordText: null },
+  });
+  revalidatePath(`/dashboard/templates/${templateId}/edit`);
+  redirect(
+    `/dashboard/templates/${templateId}/edit?toast=saved&toastMsg=${encodeURIComponent("Aperçu automatique (champs) réactivé.")}`,
+  );
 }
 
 export type GuildSettingsFormState = {

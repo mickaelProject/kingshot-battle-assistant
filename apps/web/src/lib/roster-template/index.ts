@@ -1,11 +1,12 @@
 export type {
   GeneratedRosterPhase,
+  PlayStyle,
   RosterEventType,
   RosterGenerationInput,
   RosterPlayer,
 } from "./types";
 export { parseRosterLines } from "./parse-roster";
 export {
-  generatePhasesFromRoster,
+  generateDraftPhasesFromRoster,
   pickLeaderCandidates,
-} from "./generate-from-roster";
+} from "@/lib/roster-generation.service";
