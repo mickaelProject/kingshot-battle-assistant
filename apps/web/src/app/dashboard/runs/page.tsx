@@ -205,7 +205,7 @@ export default async function RunsPage() {
   );
 
   return (
-    <div className="dashboard-main runs-dashboard">
+    <div className="dashboard-main runs-dashboard runs-dashboard--premium">
       <PageHeader
         title="Centre de mission"
         description="Suivez les batailles planifiées, pilotez celles en direct, consultez l’historique."

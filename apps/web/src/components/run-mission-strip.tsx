@@ -36,6 +36,7 @@ export function RunMissionStrip({
   const elapsedSec = Math.floor((now - anchorMs) / 1000);
   const eventTotalSec = Math.max(1, eventDurationMinutes * 60);
   const progress = Math.min(100, (elapsedSec / eventTotalSec) * 100);
+  const remainingSec = Math.max(0, eventTotalSec - elapsedSec);
 
   if (!["ACTIVE", "STARTING"].includes(status)) {
     return null;
@@ -48,6 +49,12 @@ export function RunMissionStrip({
           <span className="run-mission-strip__label">Temps écoulé</span>
           <strong className="run-mission-strip__value">
             {formatElapsedClock(elapsedSec)}
+          </strong>
+        </div>
+        <div className="run-mission-strip__metric">
+          <span className="run-mission-strip__label">Temps restant</span>
+          <strong className="run-mission-strip__value">
+            {formatElapsedClock(remainingSec)}
           </strong>
         </div>
         <div className="run-mission-strip__metric">
@@ -69,7 +76,7 @@ export function RunMissionStrip({
         aria-valuenow={Math.round(progress)}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label="Progression approximative sur la durée événement"
+        aria-label="Progression sur la durée événement in-game"
       >
         <span
           className="run-mission-strip__bar-fill"

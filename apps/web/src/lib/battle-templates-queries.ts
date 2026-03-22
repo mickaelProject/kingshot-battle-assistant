@@ -15,6 +15,12 @@ function isMissingEventDurationColumn(e: unknown): boolean {
   );
 }
 
+/** Mutable pour compatibilité avec les types `orderBy` Prisma (pas `readonly[]`). */
+const eventsOrderPhases: Prisma.BattleEventDefinitionOrderByWithRelationInput[] = [
+  { offsetSeconds: "asc" },
+  { orderIndex: "asc" },
+];
+
 const eventsForWizard = {
   orderBy: { offsetSeconds: "asc" as const },
   select: {
@@ -73,7 +79,7 @@ export type TemplateRowForTemplatesPage = {
   eventDurationMinutes: number;
   isDefault: boolean;
   guild: { id: string };
-  events: { offsetSeconds: number }[];
+  events: { offsetSeconds: number; phaseType: BattlePhaseType; title: string }[];
 };
 
 export async function fetchBattleTemplatesForTemplatesPage(): Promise<
@@ -87,14 +93,18 @@ export async function fetchBattleTemplatesForTemplatesPage(): Promise<
     eventDurationMinutes: true,
     isDefault: true,
     guild: { select: { id: true } },
-    events: { select: { offsetSeconds: true } },
-  } as const;
+    events: {
+      orderBy: eventsOrderPhases,
+      select: { offsetSeconds: true, phaseType: true, title: true },
+    },
+  };
 
   try {
-    return await prisma.battleTemplate.findMany({
+    const rows = await prisma.battleTemplate.findMany({
       orderBy: [{ guildId: "asc" }, { name: "asc" }],
       select: selectWith,
     });
+    return rows as unknown as TemplateRowForTemplatesPage[];
   } catch (e) {
     if (!isMissingEventDurationColumn(e)) throw e;
     const rows = await prisma.battleTemplate.findMany({
@@ -106,18 +116,18 @@ export async function fetchBattleTemplatesForTemplatesPage(): Promise<
         guildId: true,
         isDefault: true,
         guild: { select: { id: true } },
-        events: { select: { offsetSeconds: true } },
+        events: {
+          orderBy: eventsOrderPhases,
+          select: { offsetSeconds: true, phaseType: true, title: true },
+        },
       },
     });
-    return rows.map((r) => ({ ...r, eventDurationMinutes: 60 }));
+    return rows.map((r) => ({
+      ...r,
+      eventDurationMinutes: 60,
+    })) as unknown as TemplateRowForTemplatesPage[];
   }
 }
-
-/** Mutable pour compatibilité avec les types `orderBy` Prisma (pas `readonly[]`). */
-const eventsOrderPhases: Prisma.BattleEventDefinitionOrderByWithRelationInput[] = [
-  { offsetSeconds: "asc" },
-  { orderIndex: "asc" },
-];
 
 const selectTemplateForEditBase = {
   id: true,

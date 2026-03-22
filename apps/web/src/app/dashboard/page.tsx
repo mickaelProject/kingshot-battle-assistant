@@ -1,7 +1,10 @@
 import Link from "next/link";
+import {
+  OverviewActivityFeed,
+  type OverviewActivityItem,
+} from "@/components/overview-activity-feed";
 import { RunMissionStrip } from "@/components/run-mission-strip";
 import { EmptyState } from "@/components/ui/empty-state";
-import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -25,20 +28,22 @@ function ActiveEventBody({ run }: { run: OverviewActiveRun }) {
   const next = reminders.find((x) => x.status === "PENDING");
 
   return (
-    <div className="overview-mission">
+    <div className="overview-mission overview-mission--hero">
       <div className="overview-highlight__top">
         <StatusBadge status={run.status} />
         <span className="muted">
           {run.channelNameSnapshot ? (
             <>
-              Salon <strong>#{run.channelNameSnapshot}</strong>
+              Canal <strong>#{run.channelNameSnapshot}</strong>
             </>
           ) : (
-            "Salon configuré"
+            "Canal configuré"
           )}
         </span>
       </div>
-      <p className="overview-highlight__title">{run.template.name}</p>
+      <p className="overview-highlight__title overview-highlight__title--xl">
+        {run.template.name}
+      </p>
       <RunMissionStrip
         status={run.status}
         startedAtIso={run.session?.startedAt?.toISOString() ?? null}
@@ -49,8 +54,11 @@ function ActiveEventBody({ run }: { run: OverviewActiveRun }) {
         phasesDone={phasesDone}
         phasesTotal={phasesTotal}
       />
-      <Link href="/dashboard/runs" className="btn btn-primary overview-mission__cta">
-        Piloter l’événement
+      <Link
+        href="/dashboard/runs"
+        className="btn btn-primary overview-mission__cta"
+      >
+        Piloter en direct
       </Link>
     </div>
   );
@@ -59,7 +67,13 @@ function ActiveEventBody({ run }: { run: OverviewActiveRun }) {
 export default async function OverviewPage() {
   const botOk = hasDiscordBotToken();
 
-  const [nextRun, activeRun, guilds, templateCount] = await Promise.all([
+  const [
+    nextRun,
+    activeRun,
+    guilds,
+    templateCount,
+    rawActivity,
+  ] = await Promise.all([
     prisma.managedEventRun.findFirst({
       where: { status: "SCHEDULED" },
       orderBy: { scheduledAt: "asc" },
@@ -77,7 +91,23 @@ export default async function OverviewPage() {
       },
     }),
     prisma.battleTemplate.count(),
+    prisma.managedEventRunLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 14,
+      include: {
+        run: { select: { id: true, template: { select: { name: true } } } },
+      },
+    }),
   ]);
+
+  const activityItems: OverviewActivityItem[] = rawActivity.map((log) => ({
+    id: log.id,
+    level: log.level,
+    message: log.message,
+    createdAt: log.createdAt,
+    runId: log.runId,
+    templateName: log.run.template?.name ?? null,
+  }));
 
   const channelNameByGuild = new Map<string, Map<string, string>>();
   if (botOk) {
@@ -93,48 +123,76 @@ export default async function OverviewPage() {
     guilds.length === 0
       ? "Aucun serveur relié"
       : channelsReady === guilds.length
-        ? "Salons tactiques prêts"
-        : `${channelsReady} / ${guilds.length} salon${guilds.length > 1 ? "s" : ""} défini${guilds.length > 1 ? "s" : ""}`;
+        ? "Tous les canaux tactiques sont prêts"
+        : `${channelsReady} / ${guilds.length} canal${guilds.length > 1 ? "x" : ""} défini${guilds.length > 1 ? "s" : ""}`;
+
+  const liveServerOk = botOk && guilds.length > 0 && channelsReady === guilds.length;
 
   return (
-    <div className="dashboard-main dashboard-home">
-      <PageHeader
-        emphasis="hero"
-        title="Centre de contrôle bataille"
-        description="Gérez les batailles de votre alliance au même endroit — sans jargon technique."
-        actions={
-          <div className="btn-row btn-row--hero">
-            <Link href="/dashboard/events" className="btn btn-primary">
-              Lancer un événement
-            </Link>
-            <Link
-              href="/dashboard/events?mode=schedule"
-              className="btn btn-secondary"
-            >
-              Planifier
-            </Link>
-            <Link href="/dashboard/templates/new" className="btn btn-ghost">
-              Créer un modèle
-            </Link>
+    <div className="dashboard-main dashboard-home dashboard-home--cc">
+      <section className="cc-hero">
+        <div className="cc-hero__grid">
+          <div className="cc-hero__copy">
+            <p className="cc-hero__eyebrow">Command Center</p>
+            <h1 className="cc-hero__title">Votre bataille, en temps réel</h1>
+            <p className="cc-hero__desc muted">
+              Un seul écran pour lancer, suivre et ajuster la mission — sans
+              jargon technique.
+            </p>
+            <div className="cc-hero__actions">
+              <Link href="/dashboard/events" className="btn btn-primary">
+                Lancer un événement
+              </Link>
+              <Link
+                href="/dashboard/events?mode=schedule"
+                className="btn btn-secondary"
+              >
+                Planifier
+              </Link>
+              <Link href="/dashboard/templates/new" className="btn btn-ghost">
+                Nouveau modèle
+              </Link>
+            </div>
           </div>
-        }
-      />
+          <div className="cc-hero__status-card">
+            <p className="cc-hero__status-label">État du terrain</p>
+            <div
+              className={`cc-live-ring ${liveServerOk ? "cc-live-ring--ok" : "cc-live-ring--warn"}`}
+            >
+              <span className="cc-live-ring__pulse" aria-hidden />
+              <div className="cc-live-ring__body">
+                <strong className="cc-live-ring__title">
+                  {liveServerOk ? "Opérationnel" : "Attention requise"}
+                </strong>
+                <p className="cc-live-ring__meta muted">
+                  {botOk ? "Bot connecté (token présent)" : "Token bot manquant"}
+                  <br />
+                  {serverStatusLabel}
+                </p>
+                <Link href="/dashboard/server" className="text-link cc-live-ring__link">
+                  Réglages serveur
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <div className="stats-grid stats-grid--cockpit">
+      <div className="stats-grid stats-grid--cockpit stats-grid--cc">
         <SectionCard title="Événement en cours" className="section-card--glow">
           {activeRun ? (
             <ActiveEventBody run={activeRun} />
           ) : (
             <EmptyState
-              title="Aucun événement actif"
-              description="Quand une bataille tourne, progression et prochaine annonce s’affichent ici."
-              actionLabel="Lancer ou planifier"
+              title="Pas de bataille active"
+              description="Dès qu’une mission tourne, la progression et la prochaine annonce s’affichent ici."
+              actionLabel="Lancer une mission"
               actionHref="/dashboard/events"
             />
           )}
         </SectionCard>
 
-        <SectionCard title="Prochain événement planifié">
+        <SectionCard title="Prochaine mission">
           {nextRun ? (
             <div className="overview-highlight">
               <div className="overview-highlight__top">
@@ -146,7 +204,7 @@ export default async function OverviewPage() {
               <p className="overview-highlight__title">{nextRun.template.name}</p>
               {nextRun.channelNameSnapshot ? (
                 <p className="muted">
-                  Salon · <strong>#{nextRun.channelNameSnapshot}</strong>
+                  Canal · <strong>#{nextRun.channelNameSnapshot}</strong>
                 </p>
               ) : null}
               <div className="overview-card-actions">
@@ -154,14 +212,14 @@ export default async function OverviewPage() {
                   href={`/dashboard/runs/${nextRun.id}`}
                   className="btn btn-secondary btn-small"
                 >
-                  Modifier / gérer
+                  Gérer
                 </Link>
               </div>
             </div>
           ) : (
             <EmptyState
-              title="Rien de planifié"
-              description="Ajoutez une date ou lancez tout de suite depuis Événements."
+              title="Aucune mission planifiée"
+              description="Choisissez une date ou lancez immédiatement depuis Événements."
               actionLabel="Planifier ou lancer"
               actionHref="/dashboard/events"
             />
@@ -179,11 +237,11 @@ export default async function OverviewPage() {
             className="text-link"
             style={{ marginTop: "0.85rem", display: "inline-block" }}
           >
-            Gérer les modèles →
+            Bibliothèque de modèles →
           </Link>
         </SectionCard>
 
-        <SectionCard title="État du système">
+        <SectionCard title="Système">
           <ul className="status-checklist">
             <li>
               <span
@@ -191,9 +249,9 @@ export default async function OverviewPage() {
                 aria-hidden
               />
               <span>
-                <strong>Connexion bot</strong>
+                <strong>Bot Discord</strong>
                 <span className="muted">
-                  {botOk ? " — opérationnelle" : " — token manquant côté admin"}
+                  {botOk ? " — prêt à exécuter" : " — configuration incomplète"}
                 </span>
               </span>
             </li>
@@ -210,16 +268,24 @@ export default async function OverviewPage() {
           </ul>
           {guilds.length > 0 ? (
             <Link href="/dashboard/server" className="text-link">
-              Ouvrir les réglages serveur →
+              Paramètres →
             </Link>
           ) : null}
         </SectionCard>
       </div>
 
+      <SectionCard
+        title="Fil d’activité"
+        subtitle="Dernières traces techniques (sessions, phases, statuts)."
+        className="section-card--activity"
+      >
+        <OverviewActivityFeed items={activityItems} />
+      </SectionCard>
+
       {guilds.length > 1 ? (
         <SectionCard
           title="Vos serveurs Discord"
-          subtitle="Chaque serveur a ses propres réglages (salon, modèle par défaut)."
+          subtitle="Chaque serveur a son canal tactique et son modèle par défaut."
         >
           <div className="server-grid">
             {guilds.map((g, idx) => {
@@ -228,11 +294,9 @@ export default async function OverviewPage() {
                 g.battleChannelId && cmap?.get(g.battleChannelId);
               return (
                 <div key={g.id} className="server-card">
-                  <div className="server-card__label">
-                    Serveur {idx + 1}
-                  </div>
+                  <div className="server-card__label">Serveur {idx + 1}</div>
                   <p className="server-card__meta">
-                    <span className="muted">Salon tactique · </span>
+                    <span className="muted">Canal tactique · </span>
                     {chName ? (
                       <strong>#{chName}</strong>
                     ) : g.battleChannelId ? (

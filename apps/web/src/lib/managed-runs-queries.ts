@@ -213,6 +213,8 @@ export type ManagedRunDetailRow = {
       title: string;
       phaseType: BattlePhaseType;
       scheduledAt: Date;
+      objective: string;
+      action: string;
     }[];
   } | null;
   logs: { id: string; level: string; message: string; createdAt: Date }[];
@@ -263,6 +265,8 @@ function buildRunDetailSelect(flags: DetailFlags): Prisma.ManagedEventRunSelect 
             title: true,
             phaseType: true,
             scheduledAt: true,
+            objective: true,
+            action: true,
           },
         },
       },
@@ -303,6 +307,8 @@ function normalizeDetailRow(
       title: string;
       phaseType: BattlePhaseType;
       scheduledAt: Date;
+      objective: string;
+      action: string;
     }[];
   };
   return {
