@@ -80,11 +80,39 @@ export default async function ServerSettingsPage({
       ) : null}
 
       {dbLoadFailed ? (
-        <SectionCard title="Reglages serveur indisponibles" subtitle="Connexion DB impossible">
+        <SectionCard
+          title="Réglages serveur indisponibles"
+          subtitle="Connexion base de données impossible"
+        >
           <p className="muted">
-            L&apos;interface admin ne peut pas recuperer les serveurs pour le moment.
-            Verifie la connexion PostgreSQL et recharge cette page.
+            L&apos;interface admin ne peut pas joindre PostgreSQL. Vérifiez la variable{" "}
+            <code className="roster-code-hint">DATABASE_URL</code> puis rechargez la page.
           </p>
+          {process.env.RAILWAY_ENVIRONMENT ? (
+            <ul className="server-db-railway-hint muted">
+              <li>
+                Sur le service <strong>Web</strong> Railway : ajoutez{" "}
+                <code className="roster-code-hint">DATABASE_URL</code> (souvent une{" "}
+                <em>référence</em> vers le plugin Postgres :{" "}
+                <code className="roster-code-hint">{"${{ Postgres.DATABASE_URL }}"}</code>
+                — adaptez le nom du service).
+              </li>
+              <li>
+                Même URL que le <strong>bot</strong> ; le web ne lit pas automatiquement
+                les variables du service Postgres.
+              </li>
+              <li>
+                Si besoin, ajoutez <code className="roster-code-hint">&amp;sslmode=require</code>{" "}
+                à l&apos;URL (le déploiement peut aussi l&apos;ajouter tout seul pour les hôtes
+                Railway).
+              </li>
+              <li>
+                Modèle de checklist : fichier{" "}
+                <code className="roster-code-hint">.env.railway.example</code> à la racine du
+                dépôt.
+              </li>
+            </ul>
+          ) : null}
         </SectionCard>
       ) : guilds.length === 0 ? (
         <SectionCard title={t("emptyTitle")} subtitle={t("emptySubtitle")}>

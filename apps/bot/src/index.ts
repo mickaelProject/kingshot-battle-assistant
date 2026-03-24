@@ -25,6 +25,48 @@ const scheduler = new ReminderScheduler(client);
 
 const MANAGED_POLL_MS = 15_000;
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Railway : Postgres peut démarrer après le bot ; le proxy public peut aussi
+ * être lent. Plusieurs tentatives évitent un crash immédiat sur P1001.
+ * Si la DATABASE_URL est fausse ou la DB arrêtée, on échoue après N essais.
+ */
+async function hydrateSchedulerWithRetries(): Promise<void> {
+  const attempts = 12;
+  const gapMs = 5_000;
+  const url = process.env.DATABASE_URL ?? "";
+  if (url.includes("proxy.rlwy.net")) {
+    log.warn(
+      "bot",
+      "DATABASE_URL utilise le proxy public Railway ; sur le même projet, préférez l’URL réseau privé du service Postgres (variables Railway / lien de service).",
+    );
+  }
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await scheduler.hydrateFromDatabase();
+      return;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (i === attempts) {
+        log.error("bot", "hydrate reminders — échec définitif (DB injoignable ?)", {
+          attempts,
+          message,
+        });
+        throw e;
+      }
+      log.warn("bot", "hydrate reminders — nouvel essai après erreur DB", {
+        attempt: i,
+        attempts,
+        message,
+      });
+      await sleep(gapMs);
+    }
+  }
+}
+
 client.once(Events.ClientReady, async (c) => {
   log.info("bot", "Discord prêt", { user: c.user.tag });
   let synced = 0;
@@ -42,7 +84,7 @@ client.once(Events.ClientReady, async (c) => {
   if (synced > 0) {
     log.info("bot", "guildes synchronisées avec la base", { count: synced });
   }
-  await scheduler.hydrateFromDatabase();
+  await hydrateSchedulerWithRetries();
   startHttpControlServer(scheduler);
   setInterval(() => {
     void processDueManagedEvents(c, scheduler).catch((err) =>

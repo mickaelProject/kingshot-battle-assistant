@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import { config as loadEnvFile } from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import { isAdminDevUi } from "./is-admin-dev-ui";
+import { normalizePostgresUrlForCloud } from "@kingshot/shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../..");
@@ -32,7 +33,13 @@ function ensureDatabaseUrl(): void {
 
 ensureDatabaseUrl();
 
-const databaseUrl = process.env.DATABASE_URL?.trim();
+const databaseUrlRaw = process.env.DATABASE_URL?.trim();
+const databaseUrl = databaseUrlRaw
+  ? normalizePostgresUrlForCloud(databaseUrlRaw)
+  : "";
+if (databaseUrlRaw && databaseUrl !== databaseUrlRaw) {
+  process.env.DATABASE_URL = databaseUrl;
+}
 if (!databaseUrl) {
   const devHint = isAdminDevUi()
     ? " En développement : créez apps/web/.env.local (npm run setup:local) ou renseignez apps/web/.env."
