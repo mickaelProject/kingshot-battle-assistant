@@ -11,6 +11,7 @@ import { AddPhaseModal } from "@/components/template-editor/add-phase-modal";
 import { TemplateMissionFlow } from "@/components/template-mission-flow";
 import { TemplateDangerZone } from "@/components/template-editor/template-danger-zone";
 import { TemplateDescriptionField } from "@/components/template-editor/template-description-field";
+import { SwordlandStaticMapSchematic } from "@/components/swordland-static-map-schematic";
 import { DiscordPreview } from "@/components/template/DiscordPreview";
 import { PhaseEditor } from "@/components/template/PhaseEditor";
 import type { EditorPhase, PhaseLiveDraft } from "@/lib/editor-phase";
@@ -555,6 +556,12 @@ export function TemplateEditorShell({
                 </div>
               </div>
             </div>
+
+            {eventProductKey === "swordland" ? (
+              <div className="mt-6 rounded-2xl border border-[#1e2230] bg-[#121826] p-4 shadow-xl shadow-black/35 ring-1 ring-white/[0.05] md:p-5">
+                <SwordlandStaticMapSchematic />
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

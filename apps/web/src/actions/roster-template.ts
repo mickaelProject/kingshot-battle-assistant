@@ -23,6 +23,7 @@ import {
 } from "@/lib/tactical-war-plan";
 import {
   buildSwordlandMultiTimelinePhases,
+  composeDiscordDraftFromPhase,
   type GeneratedSwordlandPhase,
 } from "@/lib/swordland-multi-timeline";
 import type {
@@ -36,10 +37,80 @@ import {
   getEventPresetById,
   presetAllowsWizardFlow,
 } from "@/lib/event-type-registry";
-import { wizardPresetIdToIntelligenceKey } from "@/lib/event-intelligence";
+import { wizardPresetToEventProductKey } from "@/lib/events/event-registry";
 
 const MAX_ROSTER_LINES = 250;
 const MAX_PLAYERS = 200;
+
+type PhaseTextEdits = {
+  title?: string;
+  objective?: string;
+  action?: string;
+  nextHint?: string;
+};
+
+function parsePhaseEditsFromForm(
+  raw: FormDataEntryValue | null,
+): Record<string, PhaseTextEdits> {
+  const s = String(raw ?? "").trim();
+  if (!s) return {};
+  try {
+    const parsed = JSON.parse(s) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const out: Record<string, PhaseTextEdits> = {};
+    for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!val || typeof val !== "object" || Array.isArray(val)) continue;
+      const o = val as Record<string, unknown>;
+      const edit: PhaseTextEdits = {};
+      if (typeof o.title === "string") edit.title = o.title;
+      if (typeof o.objective === "string") edit.objective = o.objective;
+      if (typeof o.action === "string") edit.action = o.action;
+      if (typeof o.nextHint === "string") edit.nextHint = o.nextHint;
+      if (Object.keys(edit).length > 0) out[key] = edit;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function applyPhaseTextEdits(
+  phases: GeneratedRosterPhase[],
+  edits: Record<string, PhaseTextEdits>,
+): GeneratedRosterPhase[] {
+  if (Object.keys(edits).length === 0) return phases;
+  return phases.map((p) => {
+    const e = edits[p.key];
+    if (!e) return p;
+    return {
+      ...p,
+      ...(e.title !== undefined ? { title: e.title } : {}),
+      ...(e.objective !== undefined ? { objective: e.objective } : {}),
+      ...(e.action !== undefined ? { action: e.action } : {}),
+      ...(e.nextHint !== undefined ? { nextHint: e.nextHint } : {}),
+    };
+  });
+}
+
+function refreshSwordlandDiscordDrafts(
+  phases: GeneratedRosterPhase[],
+): GeneratedRosterPhase[] {
+  return phases.map((p) => {
+    if (
+      !("generatedDiscordDraft" in p) ||
+      typeof (p as GeneratedSwordlandPhase).generatedDiscordDraft !== "string"
+    ) {
+      return p;
+    }
+    const sp = p as GeneratedSwordlandPhase;
+    return {
+      ...p,
+      generatedDiscordDraft: composeDiscordDraftFromPhase(sp),
+    };
+  });
+}
 
 const EVENT_TYPES: RosterEventType[] = [
   "GENERIC",
@@ -358,6 +429,8 @@ export async function createTemplateFromRosterAction(formData: FormData) {
     );
   }
 
+  const phaseEdits = parsePhaseEditsFromForm(formData.get("phaseEditsJson"));
+
   let phases: GeneratedRosterPhase[];
   try {
     const r = runGeneration(
@@ -369,7 +442,9 @@ export async function createTemplateFromRosterAction(formData: FormData) {
       swordlandShowdownPreset,
       battleArchetype,
     );
-    phases = r.phases;
+    phases = refreshSwordlandDiscordDrafts(
+      applyPhaseTextEdits(r.phases, phaseEdits),
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     redirect(
@@ -383,8 +458,7 @@ export async function createTemplateFromRosterAction(formData: FormData) {
     `Créé le ${new Date().toISOString().slice(0, 10)}.`,
   ].join(" ");
 
-  const eventProductKey =
-    wizardPresetIdToIntelligenceKey(eventPresetId) ?? "swordland";
+  const eventProductKey = wizardPresetToEventProductKey(eventPresetId);
 
   const template = await prisma.$transaction(async (tx) => {
     const t = await tx.battleTemplate.create({

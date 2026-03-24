@@ -1,0 +1,22 @@
+# PostgreSQL local pour développer sans Railway.
+# Démarrage : npm run db:up  (à la racine du repo)
+#
+# Port hôte 5433 (évite le conflit si PostgreSQL Windows est déjà sur 5432 avec un autre mot de passe → P1000).
+# URL : postgresql://postgres:postgres@localhost:5433/kingshot?schema=public
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kingshot-postgres-local
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kingshot
+    volumes:
+      - kingshot_pgdata:/var/lib/postgresql/data
+
+volumes:
+  kingshot_pgdata:

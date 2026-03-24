@@ -9,6 +9,7 @@ import {
   getDiscordBotInviteUrl,
   getDiscordInstallRedirectUri,
 } from "@/lib/discord-invite";
+import { isAdminDevUi } from "@/lib/is-admin-dev-ui";
 import { prisma } from "@/lib/prisma";
 import {
   formatOffsetLabel,
@@ -112,6 +113,7 @@ export default async function EventsPage({
       initialTemplateId={sp.templateId}
       initialGuildSettingsId={sp.guildId}
       scheduleMode={sp.mode === "schedule"}
+      devManualChannelEntry={isAdminDevUi()}
     />
   );
 }

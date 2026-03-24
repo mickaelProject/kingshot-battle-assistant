@@ -45,8 +45,19 @@ export function GuildSettingsCard({
       </h2>
       {!discordConfigured ? (
         <p className="err">
-          Ajoute <code>DISCORD_BOT_TOKEN</code> dans <code>apps/web/.env</code>{" "}
-          (même token que le bot) pour lister les salons texte.
+          {process.env.NODE_ENV === "development" ? (
+            <>
+              Ajoute <code>DISCORD_BOT_TOKEN</code> dans{" "}
+              <code>apps/web/.env</code> ou <code>.env.local</code> (même token
+              que le bot) pour lister les salons texte.
+            </>
+          ) : (
+            <>
+              Configure la variable d&apos;environnement{" "}
+              <code>DISCORD_BOT_TOKEN</code> (identique au token du bot Discord)
+              pour lister les salons texte.
+            </>
+          )}
         </p>
       ) : channels.length === 0 ? (
         <p className="err">

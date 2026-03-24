@@ -98,6 +98,8 @@ export interface RosterEditorProps {
   groupBLabel?: string;
   groupABadge?: string;
   groupBBadge?: string;
+  /** Un seul bloc roster (ex. mobilisation — tout l’effectif dans le champ A). */
+  singleGroup?: boolean;
   valueA: string;
   valueB: string;
   onValueAChange: (v: string) => void;
@@ -111,6 +113,7 @@ export function RosterEditor({
   groupBLabel = "Groupe B",
   groupABadge = "Principal",
   groupBBadge = "Secondaire",
+  singleGroup = false,
   valueA,
   valueB,
   onValueAChange,
@@ -176,36 +179,43 @@ export function RosterEditor({
         />
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[#1e2230] bg-[#111318]">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1e2230] px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <label
-              htmlFor={idB}
-              className="text-sm font-semibold text-slate-200"
-            >
-              {groupBLabel}
-            </label>
-            <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-              {groupBBadge}
+      {!singleGroup ? (
+        <div className="overflow-hidden rounded-xl border border-[#1e2230] bg-[#111318]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1e2230] px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor={idB}
+                className="text-sm font-semibold text-slate-200"
+              >
+                {groupBLabel}
+              </label>
+              <span className="rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                {groupBBadge}
+              </span>
+            </div>
+            <span className="text-xs text-slate-500">
+              {roster.groupB.length} joueur
+              {roster.groupB.length !== 1 ? "s" : ""}
             </span>
           </div>
-          <span className="text-xs text-slate-500">
-            {roster.groupB.length} joueur
-            {roster.groupB.length !== 1 ? "s" : ""}
-          </span>
+          <textarea
+            id={idB}
+            value={valueB}
+            onChange={(e) => pushB(e.target.value)}
+            rows={8}
+            spellCheck={false}
+            className="w-full resize-none border-0 bg-[#0d1117] px-4 py-3 text-sm font-sans text-slate-200 outline-none placeholder:text-slate-600"
+            placeholder={"Optionnel — une ligne par joueur"}
+          />
         </div>
-        <textarea
-          id={idB}
-          value={valueB}
-          onChange={(e) => pushB(e.target.value)}
-          rows={8}
-          spellCheck={false}
-          className="w-full resize-none border-0 bg-[#0d1117] px-4 py-3 text-sm font-sans text-slate-200 outline-none placeholder:text-slate-600"
-          placeholder={"Optionnel — une ligne par joueur"}
-        />
-      </div>
+      ) : null}
 
-      <div className="grid grid-cols-2 gap-2 rounded-lg border border-[#1e2230] bg-[#111318] p-3 sm:grid-cols-4">
+      <div
+        className={cn(
+          "grid grid-cols-2 gap-2 rounded-lg border border-[#1e2230] bg-[#111318] p-3",
+          singleGroup ? "sm:grid-cols-3" : "sm:grid-cols-4",
+        )}
+      >
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
             Total joueurs
@@ -222,14 +232,16 @@ export function RosterEditor({
             {formatPowerDisplay(sumA)}
           </p>
         </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-            Puissance B
-          </p>
-          <p className="font-mono text-lg font-semibold text-emerald-400/90">
-            {formatPowerDisplay(sumB)}
-          </p>
-        </div>
+        {!singleGroup ? (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+              Puissance B
+            </p>
+            <p className="font-mono text-lg font-semibold text-emerald-400/90">
+              {formatPowerDisplay(sumB)}
+            </p>
+          </div>
+        ) : null}
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
             Total puissance
@@ -240,9 +252,13 @@ export function RosterEditor({
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div
+        className={`grid gap-3 ${singleGroup ? "" : "sm:grid-cols-2"}`}
+      >
         <PreviewList title={`Aperçu ${groupALabel}`} players={roster.groupA} />
-        <PreviewList title={`Aperçu ${groupBLabel}`} players={roster.groupB} />
+        {!singleGroup ? (
+          <PreviewList title={`Aperçu ${groupBLabel}`} players={roster.groupB} />
+        ) : null}
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ import {
   formatUtcDatetimeInputValue,
   parseUtcDatetimeInputToDate,
 } from "@/lib/utc-legion-start-input";
+import { isDiscordSnowflake } from "@/lib/discord-rest";
 import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { UtcLegionDatetimeField } from "@/components/utc-legion-datetime-field";
 import { PageHeader } from "@/components/ui/page-header";
@@ -46,6 +47,7 @@ export function EventsWizard({
   initialTemplateId,
   initialGuildSettingsId,
   scheduleMode,
+  devManualChannelEntry = false,
 }: {
   guilds: Guild[];
   templates: Template[];
@@ -69,6 +71,8 @@ export function EventsWizard({
   initialTemplateId?: string;
   initialGuildSettingsId?: string;
   scheduleMode: boolean;
+  /** `next dev` : saisie manuelle salon si l’API Discord ne renvoie rien. */
+  devManualChannelEntry?: boolean;
 }) {
   const t = useTranslations("eventsWizard");
   const locale = useLocale() as AppLocale;
@@ -196,11 +200,17 @@ export function EventsWizard({
     : [];
 
   const canNext0 = Boolean(templateId);
-  const canNext1 =
+  const listPickOk =
     Boolean(channelId) &&
     channels.some((c) => c.id === channelId) &&
     discordConfigured &&
     channels.length > 0;
+  const manualDevOk =
+    devManualChannelEntry &&
+    isDiscordSnowflake(channelId) &&
+    channelNameSnapshot.trim().length >= 1 &&
+    (!discordConfigured || channels.length === 0);
+  const canNext1 = listPickOk || manualDevOk;
   const legionUtcOk =
     !meta?.hasLegionPhases ||
     (parseUtcDatetimeInputToDate(legion1StartsAtUtc) != null &&
@@ -364,7 +374,8 @@ export function EventsWizard({
             <p className="field-hint">{t("pickChannelHint")}</p>
             {!discordConfigured ? (
               <p className="form-error">{t("discordListError")}</p>
-            ) : (
+            ) : null}
+            {discordConfigured && channels.length > 0 ? (
               <div className="channel-pick-grid">
                 {channels.map((c) => (
                   <button
@@ -380,7 +391,57 @@ export function EventsWizard({
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
+            {discordConfigured &&
+            channels.length === 0 &&
+            !devManualChannelEntry ? (
+              <p className="form-error">{t("pickChannelEmptyList")}</p>
+            ) : null}
+            {devManualChannelEntry &&
+            (!discordConfigured || channels.length === 0) ? (
+              <div className="server-dev-only-hint events-wizard-dev-channel">
+                <p className="server-dev-only-hint__title">
+                  {t("pickChannelDevTitle")}
+                </p>
+                <p className="muted">{t("pickChannelDevHint")}</p>
+                <div className="dev-guild-shortcut__row events-wizard-dev-channel__inputs">
+                  <div className="events-wizard-dev-channel__field">
+                    <label
+                      className="dev-guild-shortcut__label"
+                      htmlFor="events-dev-channel-id"
+                    >
+                      {t("pickChannelDevId")}
+                    </label>
+                    <input
+                      id="events-dev-channel-id"
+                      className="dev-guild-shortcut__input"
+                      value={channelId}
+                      onChange={(e) => setChannelId(e.target.value)}
+                      placeholder="123456789012345678"
+                      autoComplete="off"
+                      spellCheck={false}
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="events-wizard-dev-channel__field">
+                    <label
+                      className="dev-guild-shortcut__label"
+                      htmlFor="events-dev-channel-name"
+                    >
+                      {t("pickChannelDevName")}
+                    </label>
+                    <input
+                      id="events-dev-channel-name"
+                      className="dev-guild-shortcut__input"
+                      value={channelNameSnapshot}
+                      onChange={(e) => setChannelNameSnapshot(e.target.value)}
+                      placeholder="annonces"
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div className="wizard-nav">
               <button
                 type="button"

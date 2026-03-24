@@ -2,35 +2,35 @@
 
 import Link from "next/link";
 import { useLocale } from "next-intl";
-import type { CSSProperties } from "react";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   createTemplateFromRosterAction,
   previewRosterTemplateAction,
   type RosterPreviewState,
 } from "@/actions/roster-template";
-import { RosterDraftTimeline } from "@/components/roster-draft-timeline";
+import { EventRosterReview } from "@/components/event-roster-review";
 import { RosterEditor } from "@/components/roster-editor";
-import { TacticalOrbatPanel } from "@/components/tactical-orbat-panel";
-import { SectionCard } from "@/components/ui/section-card";
-import { TacticalPhasePreview } from "@/components/tactical-phase-preview";
+import {
+  SwordlandStrategyWorkspace,
+  type SwordlandPhaseEditFields,
+} from "@/components/swordland-strategy-workspace";
+import { EVENTS } from "@/lib/events/event-registry";
 import {
   EVENT_TYPE_PRESETS,
   getEventPresetById,
   presetAllowsWizardFlow,
-  type EventPresetSupport,
 } from "@/lib/event-type-registry";
 import { fmtPowerShort } from "@/lib/roster-generation.service";
+import {
+  generateRoster,
+  type GeneratedRosterResult,
+} from "@/lib/roster/generateRoster";
 import { parseRosterLines } from "@/lib/roster-template/parse-roster";
 import type { AppLocale } from "@/i18n/config";
-import {
-  BATTLE_ARCHETYPE_OPTIONS,
-  mergeLegionPlayersUnique,
-} from "@/lib/tactical-war-plan";
-import { formatOffsetLabel } from "@/lib/time-human";
+import { mergeLegionPlayersUnique } from "@/lib/tactical-war-plan";
 
 const DURATION_MIN = 30;
-const DURATION_MAX = 60;
+const DURATION_MAX = 180;
 
 const STEP_META = [
   { n: 1, label: "Type", short: "Événement", icon: "⚔" },
@@ -40,12 +40,6 @@ const STEP_META = [
   { n: 5, label: "Revue", short: "Validation", icon: "◎" },
 ] as const;
 
-function supportPillLabel(s: EventPresetSupport): string {
-  if (s === "full") return "Prêt";
-  if (s === "partial") return "Partiel";
-  return "Bientôt";
-}
-
 function buildWizardFormData(opts: {
   guildId: string;
   name: string;
@@ -54,6 +48,7 @@ function buildWizardFormData(opts: {
   notes: string;
   eventDurationMinutes: number;
   eventPresetId: string;
+  phaseEdits?: Record<string, SwordlandPhaseEditFields>;
 }): FormData {
   const fd = new FormData();
   fd.set("guildId", opts.guildId);
@@ -73,6 +68,14 @@ function buildWizardFormData(opts: {
     opts.eventPresetId === "swordland_showdown" ? "1" : "0",
   );
   fd.set("battleArchetype", preset?.battleArchetype ?? "SWORDLAND");
+  fd.set(
+    "phaseEditsJson",
+    JSON.stringify(
+      opts.phaseEdits && Object.keys(opts.phaseEdits).length > 0
+        ? opts.phaseEdits
+        : {},
+    ),
+  );
   return fd;
 }
 
@@ -85,6 +88,9 @@ export function RosterTemplateWizard({
   const [step, setStep] = useState(1);
   const [maxStepReached, setMaxStepReached] = useState(1);
   const [previewState, setPreviewState] = useState<RosterPreviewState>(null);
+  const [clientResult, setClientResult] = useState<GeneratedRosterResult | null>(
+    null,
+  );
   const [previewPending, startPreviewTransition] = useTransition();
   const [createPending, startCreateTransition] = useTransition();
 
@@ -96,13 +102,32 @@ export function RosterTemplateWizard({
   const [rosterDraftL2, setRosterDraftL2] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [reviewTab, setReviewTab] = useState<
-    "summary" | "timeline" | "discord"
-  >("summary");
+  const [phaseEdits, setPhaseEdits] = useState<
+    Record<string, SwordlandPhaseEditFields>
+  >({});
 
   const selectedPreset = getEventPresetById(eventPresetId);
+  const evMeta = selectedPreset ? EVENTS[selectedPreset.eventType] : null;
+  const isSwordland = selectedPreset?.eventType === "swordland";
+
   const presetWizardOk =
     selectedPreset != null && presetAllowsWizardFlow(selectedPreset);
+
+  useEffect(() => {
+    const p = getEventPresetById(eventPresetId);
+    if (!p) return;
+    const e = EVENTS[p.eventType];
+    if (p.eventType === "swordland") setEventDurationMinutes(60);
+    else if (e.duration > 0) setEventDurationMinutes(e.duration);
+    else setEventDurationMinutes(45);
+  }, [eventPresetId]);
+
+  useEffect(() => {
+    setClientResult(null);
+    setPreviewState(null);
+    setPhaseEdits({});
+    setSelectedKey(null);
+  }, [eventPresetId]);
 
   function goToStep(n: number) {
     setStep(n);
@@ -149,49 +174,112 @@ export function RosterTemplateWizard({
       .sort((a, b) => a.orderIndex - b.orderIndex);
   }, [previewState]);
 
-  const selectedPhase =
-    ok && previewState.ok
-      ? sortedGlobalPhases.find((p) => p.key === selectedKey) ??
-        sortedGlobalPhases[0] ??
-        null
-      : null;
+  const reviewReady = useMemo(() => {
+    if (!selectedPreset) return false;
+    const et = selectedPreset.eventType;
+    const rules = EVENTS[et].generationRules;
+    if (et === "swordland") {
+      return (
+        ok === true &&
+        previewState != null &&
+        "ok" in previewState &&
+        previewState.ok === true
+      );
+    }
+    if (!clientResult) return false;
+    if (!rules.useServerTimeline) return true;
+    return (
+      ok === true &&
+      previewState != null &&
+      "ok" in previewState &&
+      previewState.ok === true
+    );
+  }, [selectedPreset, ok, previewState, clientResult]);
 
-  const selectedOverlay =
-    ok && selectedPhase
-      ? previewState.tacticalPlan.phaseOverlays.find(
-          (o) => o.orderIndex === selectedPhase.orderIndex,
-        )
-      : null;
+  function runGenerate() {
+    if (!selectedPreset) return;
+    const et = selectedPreset.eventType;
+    const rules = EVENTS[et].generationRules;
+    const legion2Players = rules.dualRosterFields ? liveL2 : [];
 
-  function runPreview() {
     const fd = buildWizardFormData({
       guildId,
       name: templateName,
       rosterText: rosterDraftL1,
-      rosterTextLegion2: rosterDraftL2,
+      rosterTextLegion2: rules.dualRosterFields ? rosterDraftL2 : "",
       notes,
       eventDurationMinutes,
       eventPresetId,
     });
-    startPreviewTransition(async () => {
-      const next = await previewRosterTemplateAction(previewState, fd);
-      setPreviewState(next);
-      if (next && "ok" in next && next.ok === true) {
-        const firstDiscord = next.phases.find(
-          (p) => !p.timelineScope || p.timelineScope === "GLOBAL",
-        );
-        setSelectedKey(firstDiscord?.key ?? next.phases[0]?.key ?? null);
-        goToStep(5);
-      }
+
+    if (et === "swordland") {
+      startPreviewTransition(async () => {
+        const next = await previewRosterTemplateAction(previewState, fd);
+        setPreviewState(next);
+        if (next && "ok" in next && next.ok === true) {
+          setClientResult(null);
+          setPhaseEdits({});
+          const firstDiscord = next.phases.find(
+            (p) => !p.timelineScope || p.timelineScope === "GLOBAL",
+          );
+          setSelectedKey(firstDiscord?.key ?? next.phases[0]?.key ?? null);
+          goToStep(5);
+        }
+      });
+      return;
+    }
+
+    if (rules.useServerTimeline) {
+      startPreviewTransition(async () => {
+        const next = await previewRosterTemplateAction(previewState, fd);
+        setPreviewState(next);
+        if (next && "ok" in next && next.ok === true) {
+          setClientResult(
+            generateRoster(et, { legion1: liveL1, legion2: legion2Players }),
+          );
+          setPhaseEdits({});
+          const firstDiscord = next.phases.find(
+            (p) => !p.timelineScope || p.timelineScope === "GLOBAL",
+          );
+          setSelectedKey(firstDiscord?.key ?? next.phases[0]?.key ?? null);
+          goToStep(5);
+        }
+      });
+      return;
+    }
+
+    startPreviewTransition(() => {
+      setPreviewState(null);
+      setClientResult(
+        generateRoster(et, { legion1: liveL1, legion2: legion2Players }),
+      );
+      setPhaseEdits({});
+      setSelectedKey(null);
+      goToStep(5);
     });
   }
 
   function resetPreview() {
     setPreviewState(null);
+    setClientResult(null);
     setSelectedKey(null);
+    setPhaseEdits({});
     setStep(4);
     setMaxStepReached((m) => Math.max(m, 4));
   }
+
+  const patchPhaseEdit = useCallback(
+    (key: string, patch: SwordlandPhaseEditFields) => {
+      setPhaseEdits((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+    },
+    [],
+  );
+
+  const rosterLabels = evMeta?.generationRules.rosterGroupLabels ?? {
+    a: "Groupe A",
+    b: "Groupe B",
+  };
+  const singleRosterGroup = !evMeta?.generationRules.dualRosterFields;
 
   return (
     <div className="strategy-wizard roster-war-command-center">
@@ -201,16 +289,16 @@ export function RosterTemplateWizard({
           Nouveau modèle — assistant roster
         </h1>
         <p className="strategy-wizard__lede muted">
-          Génération tactique complète pour Swordland Showdown ; autres types
-          listés comme presets (bientôt).
+          Choisissez un événement Kingshot : la génération adapte la structure
+          (légions, rôles, missions, timeline).
         </p>
       </header>
 
       <nav className="strategy-wizard__steps" aria-label="Étapes du parcours">
         {STEP_META.map((s) => {
-          const done = s.n < step || (s.n === 5 && ok);
+          const done = s.n < step || (s.n === 5 && reviewReady);
           const active = s.n === step;
-          const locked = s.n === 5 ? !ok : s.n > maxStepReached;
+          const locked = s.n === 5 ? !reviewReady : s.n > maxStepReached;
           return (
             <button
               key={s.n}
@@ -219,7 +307,7 @@ export function RosterTemplateWizard({
               disabled={locked}
               onClick={() => {
                 if (locked) return;
-                if (s.n === 5 && ok) setStep(5);
+                if (s.n === 5 && reviewReady) setStep(5);
                 else if (s.n < 5) setStep(s.n);
               }}
             >
@@ -242,52 +330,50 @@ export function RosterTemplateWizard({
               <span aria-hidden>⚔</span> Étape 1 — Type d’événement
             </h2>
             <p className="strategy-wizard__step-desc muted">
-              Registre produit des types d’événement. Seul Swordland Showdown
-              déclenche aujourd’hui la génération roster complète ; les autres
-              sont des placeholders « bientôt ».
+              Registre événements : chaque type impose ses règles de génération
+              roster et de timeline (si applicable).
             </p>
 
-            <div
-              className="strategy-wizard__event-grid strategy-wizard__event-grid--presets"
-              role="list"
-            >
-              {EVENT_TYPE_PRESETS.map((p) => {
-                const allowed = presetAllowsWizardFlow(p);
-                const selected = eventPresetId === p.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    role="listitem"
-                    disabled={!allowed}
-                    style={
-                      selected
-                        ? ({
-                            "--preset-accent": p.color,
-                          } as CSSProperties)
-                        : undefined
-                    }
-                    className={`strategy-wizard__event-card strategy-wizard__event-card--preset ${selected ? "strategy-wizard__event-card--selected" : ""} ${!allowed ? "strategy-wizard__event-card--disabled" : ""}`}
-                    onClick={() => {
-                      if (allowed) setEventPresetId(p.id);
-                    }}
-                  >
-                    <span
-                      className={`strategy-wizard__preset-support strategy-wizard__preset-support--${p.support}`}
-                    >
-                      {supportPillLabel(p.support)}
-                    </span>
-                    <span className="strategy-wizard__event-icon" aria-hidden>
-                      {p.icon}
-                    </span>
-                    <span className="strategy-wizard__event-title">{p.label}</span>
-                    <span className="strategy-wizard__event-blurb muted">
-                      {p.hint}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="strategy-wizard__field strategy-wizard__field--event-select">
+              <label htmlFor="sw-event-type">
+                <span className="strategy-wizard__field-icon" aria-hidden>
+                  🎯
+                </span>{" "}
+                Événement
+              </label>
+              <select
+                id="sw-event-type"
+                value={eventPresetId}
+                onChange={(e) => setEventPresetId(e.target.value)}
+                className="strategy-wizard__select strategy-wizard__select--event"
+              >
+                {EVENT_TYPE_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.icon} {p.label}
+                    {p.duration > 0 ? ` · ${p.duration} min` : ""}
+                    {p.timingMode === "async" ? " · async" : ""}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {evMeta ? (
+              <div className="strategy-wizard__event-detail">
+                <p className="strategy-wizard__event-detail-meta muted">
+                  {evMeta.type === "real_time" ? "Temps réel" : "Asynchrone"}
+                  {evMeta.duration > 0
+                    ? ` · ${evMeta.duration} min`
+                    : evMeta.generationRules.useServerTimeline
+                      ? ""
+                      : " · pas de timeline imposée"}
+                  {evMeta.hasLegions ? " · légions" : ""}
+                  {evMeta.hasBuildings ? " · bâtiments" : ""}
+                </p>
+                <p className="strategy-wizard__event-detail-desc">
+                  {evMeta.description}
+                </p>
+              </div>
+            ) : null}
 
             <div className="strategy-wizard__meta-grid">
               <div className="strategy-wizard__field">
@@ -352,60 +438,77 @@ export function RosterTemplateWizard({
               <span aria-hidden>⏱</span> Étape 2 — Durée de l’événement
             </h2>
             <p className="strategy-wizard__step-desc muted">
-              La timeline des annonces s’étire ou se compresse automatiquement
-              sur toute la durée choisie.
+              {isSwordland
+                ? "Swordland Showdown : créneau standard 60 minutes pour la timeline alliance."
+                : evMeta?.generationRules.useServerTimeline
+                  ? "La timeline des annonces Discord est étalée sur la durée choisie."
+                  : "Durée enregistrée sur le modèle (check-lists / brief) — pas de chronomètre d’événement imposé par le registre."}
             </p>
 
-            <div className="strategy-wizard__duration-block">
-              <div className="strategy-wizard__duration-value">
-                <strong>{eventDurationMinutes}</strong>
-                <span className="muted">min</span>
+            {isSwordland ? (
+              <div className="strategy-wizard__duration-locked">
+                <div className="strategy-wizard__duration-value strategy-wizard__duration-value--locked">
+                  <strong>60</strong>
+                  <span className="muted">min</span>
+                </div>
+                <p className="strategy-wizard__duration-locked-note muted">
+                  Durée fixe Swordland pour caler les phases automatiques.
+                </p>
               </div>
-              <input
-                type="range"
-                min={DURATION_MIN}
-                max={DURATION_MAX}
-                step={1}
-                value={Math.min(
-                  DURATION_MAX,
-                  Math.max(DURATION_MIN, eventDurationMinutes),
-                )}
-                onChange={(e) =>
-                  setEventDurationMinutes(parseInt(e.target.value, 10))
-                }
-                className="strategy-wizard__slider"
-                aria-valuemin={DURATION_MIN}
-                aria-valuemax={DURATION_MAX}
-                aria-valuenow={eventDurationMinutes}
-              />
-              <div className="strategy-wizard__duration-labels muted">
-                <span>{DURATION_MIN} min</span>
-                <span>{DURATION_MAX} min</span>
-              </div>
-              <div className="strategy-wizard__field strategy-wizard__field--inline">
-                <label htmlFor="sw-duration-input">Ajustement fin</label>
+            ) : (
+              <div className="strategy-wizard__duration-block">
+                <div className="strategy-wizard__duration-value">
+                  <strong>{eventDurationMinutes}</strong>
+                  <span className="muted">min</span>
+                </div>
                 <input
-                  id="sw-duration-input"
-                  type="number"
+                  type="range"
                   min={DURATION_MIN}
                   max={DURATION_MAX}
-                  value={eventDurationMinutes}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (Number.isNaN(v)) return;
-                    setEventDurationMinutes(
-                      Math.min(DURATION_MAX, Math.max(DURATION_MIN, v)),
-                    );
-                  }}
-                  className="strategy-wizard__input strategy-wizard__input--narrow"
+                  step={1}
+                  value={Math.min(
+                    DURATION_MAX,
+                    Math.max(DURATION_MIN, eventDurationMinutes),
+                  )}
+                  onChange={(e) =>
+                    setEventDurationMinutes(parseInt(e.target.value, 10))
+                  }
+                  className="strategy-wizard__slider"
+                  aria-valuemin={DURATION_MIN}
+                  aria-valuemax={DURATION_MAX}
+                  aria-valuenow={eventDurationMinutes}
                 />
+                <div className="strategy-wizard__duration-labels muted">
+                  <span>{DURATION_MIN} min</span>
+                  <span>{DURATION_MAX} min</span>
+                </div>
+                <div className="strategy-wizard__field strategy-wizard__field--inline">
+                  <label htmlFor="sw-duration-input">Ajustement fin</label>
+                  <input
+                    id="sw-duration-input"
+                    type="number"
+                    min={DURATION_MIN}
+                    max={DURATION_MAX}
+                    value={eventDurationMinutes}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (Number.isNaN(v)) return;
+                      setEventDurationMinutes(
+                        Math.min(DURATION_MAX, Math.max(DURATION_MIN, v)),
+                      );
+                    }}
+                    className="strategy-wizard__input strategy-wizard__input--narrow"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
-            <p className="strategy-wizard__timeline-hint">
-              <span aria-hidden>◎</span> La timeline tactique couvrira{" "}
-              <strong>T+0 → T+{eventDurationMinutes} min</strong> sans trou.
-            </p>
+            {evMeta?.generationRules.useServerTimeline ? (
+              <p className="strategy-wizard__timeline-hint">
+                <span aria-hidden>◎</span> La timeline tactique couvrira{" "}
+                <strong>T+0 → T+{eventDurationMinutes} min</strong> sans trou.
+              </p>
+            ) : null}
 
             <div className="strategy-wizard__nav">
               <button
@@ -438,38 +541,23 @@ export function RosterTemplateWizard({
             </p>
             <ul className="strategy-wizard__roster-hints muted">
               <li>
-                {eventPresetId === "swordland_showdown"
-                  ? "Légion 1 : au moins un joueur."
-                  : "Groupe A : au moins un joueur."}
+                {singleRosterGroup
+                  ? "Effectif : au moins un joueur dans le bloc principal."
+                  : `${rosterLabels.a} : au moins un joueur.`}
               </li>
               <li>
-                {eventPresetId === "swordland_showdown"
-                  ? "Légion 2 optionnelle — vide = une seule légion."
-                  : "Groupe B optionnel."}
+                {singleRosterGroup
+                  ? "Toute la liste peut tenir dans un seul champ."
+                  : `${rosterLabels.b} optionnel selon l’événement.`}
               </li>
             </ul>
 
             <RosterEditor
-              groupALabel={
-                eventPresetId === "swordland_showdown"
-                  ? "Légion 1"
-                  : "Groupe A"
-              }
-              groupBLabel={
-                eventPresetId === "swordland_showdown"
-                  ? "Légion 2"
-                  : "Groupe B"
-              }
-              groupABadge={
-                eventPresetId === "swordland_showdown"
-                  ? "Principal"
-                  : "Principal"
-              }
-              groupBBadge={
-                eventPresetId === "swordland_showdown"
-                  ? "Secondaire"
-                  : "Secondaire"
-              }
+              groupALabel={rosterLabels.a}
+              groupBLabel={rosterLabels.b}
+              groupABadge="Principal"
+              groupBBadge="Secondaire"
+              singleGroup={singleRosterGroup}
               valueA={rosterDraftL1}
               valueB={rosterDraftL2}
               onValueAChange={setRosterDraftL1}
@@ -503,14 +591,21 @@ export function RosterTemplateWizard({
               <span aria-hidden>✦</span> Étape 4 — Génération
             </h2>
             <p className="strategy-wizard__step-desc muted">
-              Nous allons produire les phases Swordland, l’ORBAT bâtiments et
-              les blocs Discord.
+              {isSwordland
+                ? "Production des phases Swordland, ORBAT bâtiments et brouillons Discord."
+                : evMeta?.generationRules.useServerTimeline
+                  ? "Génération des phases modèle + plan roster spécifique à l’événement."
+                  : "Génération locale du plan roster (tâches, rôles, missions) — le modèle servira de base éditable."}
             </p>
 
             <div className="strategy-wizard__recap">
               <div className="strategy-wizard__recap-item">
                 <span className="muted">Stratégie</span>
                 <strong>{templateName.trim() || "—"}</strong>
+              </div>
+              <div className="strategy-wizard__recap-item">
+                <span className="muted">Événement</span>
+                <strong>{selectedPreset?.label ?? "—"}</strong>
               </div>
               <div className="strategy-wizard__recap-item">
                 <span className="muted">Durée</span>
@@ -544,7 +639,7 @@ export function RosterTemplateWizard({
                 type="button"
                 className="btn btn-primary strategy-wizard__generate-btn"
                 disabled={busy || !step1Valid || !step3Valid}
-                onClick={runPreview}
+                onClick={runGenerate}
               >
                 {previewPending ? (
                   <>Génération en cours…</>
@@ -553,7 +648,7 @@ export function RosterTemplateWizard({
                     <span className="strategy-wizard__generate-icon" aria-hidden>
                       ⚡
                     </span>
-                    Générer la stratégie Swordland
+                    Générer la stratégie
                   </>
                 )}
               </button>
@@ -571,7 +666,7 @@ export function RosterTemplateWizard({
           </section>
         ) : null}
 
-        {step === 5 && ok && previewState.ok ? (
+        {step === 5 && reviewReady ? (
           <section className="strategy-wizard__step-body strategy-wizard__step-body--review">
             <div className="strategy-wizard__review-head">
               <h2 className="strategy-wizard__step-title">
@@ -587,16 +682,26 @@ export function RosterTemplateWizard({
             </div>
 
             <div className="roster-review-banner" role="status">
-              <strong>Brouillon prêt.</strong> Vérifiez ORBAT et phases avant
-              enregistrement.
-              {!previewState.timelineCoversDuration ? (
+              <strong>Brouillon prêt.</strong>{" "}
+              {isSwordland
+                ? "Vérifiez ORBAT et phases avant enregistrement."
+                : "Vérifiez le plan roster et les phases avant enregistrement."}
+              {ok &&
+              previewState &&
+              "ok" in previewState &&
+              previewState.ok === true &&
+              !previewState.timelineCoversDuration ? (
                 <span className="roster-review-banner__warn">
                   {" "}
                   (Couverture timeline à vérifier.)
                 </span>
               ) : null}
             </div>
-            {previewState.warnings.length > 0 ? (
+            {ok &&
+            previewState &&
+            "ok" in previewState &&
+            previewState.ok === true &&
+            previewState.warnings.length > 0 ? (
               <ul className="roster-wizard-warnings">
                 {previewState.warnings.map((w) => (
                   <li key={w}>{w}</li>
@@ -604,218 +709,109 @@ export function RosterTemplateWizard({
               </ul>
             ) : null}
 
-            <div className="roster-review-tabs roster-war-command-center">
-              <div
-                className="roster-review-tabs__list"
-                role="tablist"
-                aria-label="Sections de la revue"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  id="roster-review-tab-summary"
-                  aria-selected={reviewTab === "summary"}
-                  aria-controls="roster-review-panel-summary"
-                  className={`roster-review-tabs__tab${reviewTab === "summary" ? " roster-review-tabs__tab--active" : ""}`}
-                  onClick={() => setReviewTab("summary")}
-                >
-                  <span aria-hidden>◆</span> Synthèse &amp; ORBAT
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  id="roster-review-tab-timeline"
-                  aria-selected={reviewTab === "timeline"}
-                  aria-controls="roster-review-panel-timeline"
-                  className={`roster-review-tabs__tab${reviewTab === "timeline" ? " roster-review-tabs__tab--active" : ""}`}
-                  onClick={() => setReviewTab("timeline")}
-                >
-                  <span aria-hidden>◎</span> Timeline
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  id="roster-review-tab-discord"
-                  aria-selected={reviewTab === "discord"}
-                  aria-controls="roster-review-panel-discord"
-                  className={`roster-review-tabs__tab${reviewTab === "discord" ? " roster-review-tabs__tab--active" : ""}`}
-                  onClick={() => setReviewTab("discord")}
-                >
-                  <span aria-hidden>💬</span> Discord
-                </button>
-              </div>
-
-              {reviewTab === "summary" ? (
-                <div
-                  className="roster-review-tabs__panel"
-                  role="tabpanel"
-                  id="roster-review-panel-summary"
-                  aria-labelledby="roster-review-tab-summary"
-                >
-                  <div className="roster-review-tabs__stack">
-                    <SectionCard
-                      title={
-                        <>
-                          <span aria-hidden>◆</span> Synthèse
-                        </>
-                      }
-                      subtitle={`${previewState.players.length} joueurs · ${previewState.echo.eventDurationMinutes} min`}
-                    >
-                      <dl className="roster-review-stats">
-                        <dt>Phases</dt>
-                        <dd>
-                          <strong>{sortedGlobalPhases.length}</strong> annonces
-                          Discord
-                          {previewState.phases.length >
-                          sortedGlobalPhases.length ? (
-                            <span className="muted">
-                              {" "}
-                              ·{" "}
-                              {previewState.phases.length -
-                                sortedGlobalPhases.length}{" "}
-                              fiches légion
-                            </span>
-                          ) : null}
-                        </dd>
-                        <dt>Arc</dt>
-                        <dd>
-                          <strong>
-                            {
-                              BATTLE_ARCHETYPE_OPTIONS.find(
-                                (o) =>
-                                  o.value === previewState.echo.battleArchetype,
-                              )?.label
-                            }
-                          </strong>
-                        </dd>
-                      </dl>
-                    </SectionCard>
-
-                    <SectionCard
-                      title={
-                        <>
-                          <span aria-hidden>👤</span> Candidats RL
-                        </>
-                      }
-                      subtitle="Shotcallers indicatifs"
-                    >
-                      <ul className="roster-leader-list">
-                        {previewState.leaders.map((p, i) => (
-                          <li key={`${p.name}-${i}`}>
-                            <strong>{p.name}</strong>{" "}
-                            <span className="muted">
-                              ({fmtPowerShort(p.power)})
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </SectionCard>
-
-                    <SectionCard
-                      title={
-                        <>
-                          <span aria-hidden>🗺</span> Bâtiments &amp; ORBAT
-                        </>
-                      }
-                      subtitle="Assignations automatiques"
-                      className="section-card--orbat"
-                    >
-                      <TacticalOrbatPanel plan={previewState.tacticalPlan} />
-                    </SectionCard>
-                  </div>
+            {isSwordland &&
+            ok &&
+            previewState &&
+            "ok" in previewState &&
+            previewState.ok === true ? (
+              <>
+                <div className="swordland-review-kpi muted">
+                  <span>
+                    <strong>{previewState.players.length}</strong> joueurs
+                  </span>
+                  <span className="swordland-review-kpi__sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>
+                    <strong>{sortedGlobalPhases.length}</strong> annonces
+                    alliance
+                  </span>
+                  {previewState.phases.length > sortedGlobalPhases.length ? (
+                    <>
+                      <span className="swordland-review-kpi__sep" aria-hidden>
+                        ·
+                      </span>
+                      <span>
+                        +{previewState.phases.length - sortedGlobalPhases.length}{" "}
+                        fiches légion (éditeur)
+                      </span>
+                    </>
+                  ) : null}
+                  <span className="swordland-review-kpi__sep" aria-hidden>
+                    ·
+                  </span>
+                  <span>
+                    RL :{" "}
+                    {previewState.leaders.length
+                      ? previewState.leaders
+                          .slice(0, 6)
+                          .map((p) => `${p.name} (${fmtPowerShort(p.power)})`)
+                          .join(" · ")
+                      : "—"}
+                  </span>
                 </div>
-              ) : null}
 
-              {reviewTab === "timeline" ? (
-                <div
-                  className="roster-review-tabs__panel"
-                  role="tabpanel"
-                  id="roster-review-panel-timeline"
-                  aria-labelledby="roster-review-tab-timeline"
-                >
-                  <SectionCard
-                    title={
-                      <>
-                        <span aria-hidden>◎</span> Timeline tactique
-                      </>
-                    }
-                    subtitle="Timeline alliance (annonces Discord) — les fiches légion se règlent après enregistrement dans l’éditeur."
-                    className="section-card--timeline"
-                  >
-                    <RosterDraftTimeline
-                      phases={sortedGlobalPhases}
-                      eventDurationMinutes={
-                        previewState.echo.eventDurationMinutes
-                      }
-                      selectedKey={selectedKey}
-                      onSelectPhase={setSelectedKey}
-                      phaseOverlays={previewState.tacticalPlan.phaseOverlays}
-                    />
-                    <div className="tactical-phase-pills" role="list">
-                      {sortedGlobalPhases.map((match) => (
-                        <button
-                          key={match.key}
-                          type="button"
-                          role="listitem"
-                          className="tactical-phase-pill"
-                          onClick={() => setSelectedKey(match.key)}
-                        >
-                          <span className="tactical-phase-pill__t">
-                            {formatOffsetLabel(match.offsetSeconds, locale)}
-                          </span>
-                          <span className="tactical-phase-pill__type">
-                            {match.phaseType}
-                          </span>
-                          <span>{match.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </SectionCard>
+                <SwordlandStrategyWorkspace
+                  tacticalPlan={previewState.tacticalPlan}
+                  globalPhases={sortedGlobalPhases}
+                  eventDurationMinutes={previewState.echo.eventDurationMinutes}
+                  locale={locale}
+                  selectedKey={selectedKey}
+                  onSelectPhase={setSelectedKey}
+                  phaseEdits={phaseEdits}
+                  onPhaseEdit={patchPhaseEdit}
+                  showMapTab
+                />
+              </>
+            ) : clientResult ? (
+              <>
+                <div className="swordland-review-kpi muted">
+                  <span>
+                    <strong>{clientResult.mergedPlayers.length}</strong> joueurs
+                  </span>
+                  {ok &&
+                  previewState &&
+                  "ok" in previewState &&
+                  previewState.ok === true ? (
+                    <>
+                      <span className="swordland-review-kpi__sep" aria-hidden>
+                        ·
+                      </span>
+                      <span>
+                        <strong>{sortedGlobalPhases.length}</strong> phases
+                        (aperçu Discord)
+                      </span>
+                    </>
+                  ) : null}
                 </div>
-              ) : null}
-
-              {reviewTab === "discord" ? (
-                <div
-                  className="roster-review-tabs__panel"
-                  role="tabpanel"
-                  id="roster-review-panel-discord"
-                  aria-labelledby="roster-review-tab-discord"
-                >
-                  <p className="roster-review-tabs__hint muted">
-                    La phase affichée est celle sélectionnée dans l’onglet{" "}
-                    <strong>Timeline</strong>. Passez-y pour choisir une autre
-                    annonce.
-                  </p>
-                  <SectionCard
-                    title={
-                      <>
-                        <span aria-hidden>💬</span> Discord
-                      </>
-                    }
-                    subtitle="Message de la phase sélectionnée"
-                  >
-                    {selectedPhase ? (
-                      <TacticalPhasePreview
-                        phaseType={selectedPhase.phaseType}
-                        title={selectedPhase.title}
-                        objective={
-                          selectedOverlay?.markdownAppendix
-                            ? `${selectedPhase.objective.trim()}${selectedOverlay.markdownAppendix}`
-                            : selectedPhase.objective
-                        }
-                        action={selectedPhase.action}
-                        nextHint={selectedPhase.nextHint}
-                      />
-                    ) : (
-                      <p className="muted">
-                        Aucune phase sélectionnée — ouvrez l’onglet{" "}
-                        <strong>Timeline</strong> et cliquez une phase.
-                      </p>
-                    )}
-                  </SectionCard>
-                </div>
-              ) : null}
-            </div>
+                <EventRosterReview
+                  result={clientResult}
+                  globalPhases={
+                    ok && sortedGlobalPhases.length > 0
+                      ? sortedGlobalPhases
+                      : undefined
+                  }
+                  eventDurationMinutes={
+                    ok &&
+                    previewState &&
+                    "ok" in previewState &&
+                    previewState.ok === true
+                      ? previewState.echo.eventDurationMinutes
+                      : eventDurationMinutes
+                  }
+                  phaseOverlays={
+                    ok &&
+                    previewState &&
+                    "ok" in previewState &&
+                    previewState.ok === true
+                      ? previewState.tacticalPlan.phaseOverlays
+                      : undefined
+                  }
+                  selectedKey={selectedKey}
+                  onSelectPhase={setSelectedKey}
+                />
+              </>
+            ) : null}
 
             <div className="btn-row roster-review-bottom-actions">
               <button
@@ -827,10 +823,13 @@ export function RosterTemplateWizard({
                     guildId,
                     name: templateName,
                     rosterText: rosterDraftL1,
-                    rosterTextLegion2: rosterDraftL2,
+                    rosterTextLegion2: singleRosterGroup
+                      ? ""
+                      : rosterDraftL2,
                     notes,
                     eventDurationMinutes,
                     eventPresetId,
+                    phaseEdits,
                   });
                   startCreateTransition(async () => {
                     await createTemplateFromRosterAction(fd);
@@ -845,7 +844,7 @@ export function RosterTemplateWizard({
                 type="button"
                 className="btn btn-secondary"
                 disabled={busy}
-                onClick={runPreview}
+                onClick={runGenerate}
               >
                 Régénérer
               </button>
@@ -856,7 +855,7 @@ export function RosterTemplateWizard({
 
       {previewPending ? (
         <p className="muted strategy-wizard__pending" aria-live="polite">
-          Génération du plan tactique…
+          Génération du plan…
         </p>
       ) : null}
     </div>

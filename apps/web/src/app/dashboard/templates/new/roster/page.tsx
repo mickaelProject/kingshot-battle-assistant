@@ -1,20 +1,41 @@
 import Link from "next/link";
 import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { PageHeader } from "@/components/ui/page-header";
+import { PostgresUnavailableCard } from "@/components/postgres-unavailable-card";
 import { SectionCard } from "@/components/ui/section-card";
 import {
   getDiscordBotInviteUrl,
   getDiscordInstallRedirectUri,
 } from "@/lib/discord-invite";
-import { prisma } from "@/lib/prisma";
+import { tryLoadGuildSettingsAsc } from "@/lib/try-guild-settings";
 import { RosterTemplateWizard } from "./roster-wizard";
 
 export default async function NewTemplateFromRosterPage() {
   const discordInviteUrl = getDiscordBotInviteUrl();
   const installRedirectUri = getDiscordInstallRedirectUri();
-  const guilds = await prisma.guildSettings.findMany({
-    orderBy: { discordGuildId: "asc" },
-  });
+  const loaded = await tryLoadGuildSettingsAsc();
+
+  if (!loaded.ok) {
+    return (
+      <div className="dashboard-main">
+        <p className="run-detail__back">
+          <Link href="/dashboard/templates/new" className="text-link">
+            ← Choix du mode
+          </Link>
+        </p>
+        <PageHeader
+          title="Créer un modèle depuis le roster"
+          description="Assistant dédié : roster, phases et ORBAT Swordland."
+        />
+        <PostgresUnavailableCard
+          backHref="/dashboard/templates/new"
+          backLabel="← Choix du mode"
+        />
+      </div>
+    );
+  }
+
+  const guilds = loaded.guilds;
 
   return (
     <div className="dashboard-main">

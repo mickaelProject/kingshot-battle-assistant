@@ -20,18 +20,18 @@
     "groupOps": "Operaciones",
     "groupNetwork": "Red",
     "brandSubtitle": "ASISTENTE DE BATALLA",
-    "botConnected": "Bot conectado",
-    "botDisconnected": "Bot no configurado"
+    "botConnected": "Token web definido",
+    "botDisconnected": "Sin token web"
   },
   "common": {
     "live": "LIVE"
   },
   "topbar": {
     "hint": "Centro de mando",
-    "botOkTitle": "Token del bot presente: el worker puede controlar Discord.",
-    "botWarnTitle": "Falta el token del bot: configure DISCORD_BOT_TOKEN.",
-    "botOk": "Bot listo",
-    "botWarn": "Bot fuera de línea",
+    "botOkTitle": "DISCORD_BOT_TOKEN está definido para este sitio (API Discord desde el admin). No garantiza que el proceso del bot esté en marcha ni que exista una fila de guild.",
+    "botWarnTitle": "Falta DISCORD_BOT_TOKEN — las listas de canales no funcionarán.",
+    "botOk": "Token web OK",
+    "botWarn": "Sin token web",
     "launchEvent": "Lanzar un evento",
     "logout": "Cerrar sesión"
   },
@@ -50,7 +50,7 @@
     "noServers": "Ningún servidor vinculado",
     "allChannelsReady": "Todos los canales tácticos están listos",
     "someChannelsReady": "{ready} / {total} canales definidos",
-    "tokenMissing": " · falta el token del bot",
+    "tokenMissing": " · falta DISCORD_BOT_TOKEN",
     "fieldStateTitle": "Estado del terreno",
     "serverSettingsLink": "Ajustes del servidor",
     "activityTitle": "Actividad",
@@ -93,8 +93,8 @@
     "statBot": "BOT DISCORD",
     "statBotOk": "OK",
     "statBotErr": "ERR",
-    "workerReady": "Worker listo",
-    "checkConnection": "Comprobar conexión"
+    "workerReady": "Token web para API",
+    "checkConnection": "Sin token web"
   },
   "sitrep": {
     "aria": "Informe de situación",
@@ -130,6 +130,21 @@
     "emptyTitle": "Sin plantillas",
     "emptyBody": "Crea una plantilla o inicializa desde el bot.",
     "emptyNoGuild": "Sin servidor en base: primero invita al bot (ver abajo).",
+    "devGuild": {
+      "title": "Atajo local (next dev)",
+      "body": "«Token web OK» solo indica que DISCORD_BOT_TOKEN está definido aquí, no que el proceso del bot haya escrito en la base. Para desbloquear plantillas sin esperar al bot, registra el ID del servidor de Discord:",
+      "prefillNote": "Valor tomado de DEV_DISCORD_GUILD_ID en .env.local.",
+      "label": "ID del servidor Discord (snowflake)",
+      "placeholder": "ej. 123456789012345678",
+      "submit": "Guardar en base",
+      "saving": "Guardando…",
+      "success": "Guild guardada. La página se actualiza: puedes crear una plantilla o ir a Servidor para elegir el canal.",
+      "errors": {
+        "not_dev": "Desactivado fuera del modo desarrollo.",
+        "invalid_id": "ID inválido: 17–22 dígitos. Activa el modo desarrollador en Discord → clic derecho en el icono del servidor → Copiar ID del servidor.",
+        "db_error": "Error PostgreSQL — revisa DATABASE_URL y npm run db:migrate:local."
+      }
+    },
     "create": "Crear plantilla",
     "fromRosterShort": "Desde roster",
     "badgeDefault": "Por defecto",
@@ -150,10 +165,12 @@
   },
   "discordInvite": {
     "inviteBtn": "Invitar el bot a mi servidor de Discord",
-    "missingEnv": "Falta la variable DISCORD_CLIENT_ID (en apps/web/.env). Usa el mismo valor que en el bot (Discord → ID de aplicación).",
+    "missingEnv": "Falta la variable <mono>DISCORD_CLIENT_ID</mono>. Añade el <strong>ID de aplicación</strong> de Discord (el mismo que usa el bot) en las variables de entorno del sitio.",
+    "missingEnvDev": "En desarrollo: <mono>apps/web/.env</mono> o <mono>.env.local</mono>.",
     "openTabHint": "El enlace se abre en una <strong>nueva pestaña</strong> para mantener el panel aquí. Tras «Autorizar», si Discord muestra éxito, cierra esa pestaña y vuelve aquí.",
     "oauthExtra": "Si la redirección OAuth está bien configurada, Discord puede abrir tu panel en la nueva pestaña.",
-    "redirectSetup": "Para redirección automática, define DISCORD_INSTALL_REDIRECT_URL o NEXT_PUBLIC_APP_URL en apps/web/.env y la misma URL en Discord → OAuth2 → Redirects.",
+    "redirectSetup": "Para redirección automática, define <mono>DISCORD_INSTALL_REDIRECT_URL</mono> o <mono>NEXT_PUBLIC_APP_URL</mono> con la URL pública del panel y registra <strong>exactamente</strong> la misma URL en Discord → OAuth2 → Redirects.",
+    "redirectSetupDev": "Ejemplo local: <mono>http://localhost:3000/dashboard/server</mono> (añádela en Redirects).",
     "portalHint": "Discord → OAuth2 → <strong>Redirects</strong>: añade exactamente",
     "step1": "En la nueva pestaña, elige tu servidor y acepta permisos.",
     "step2": "En Discord, como <strong>administrador</strong>, usa un comando slash del bot una vez (p. ej. /setup channel) para registrar la guild.",
@@ -181,6 +198,11 @@
     "pickChannelTitle": "¿Dónde publicar en Discord?",
     "pickChannelHint": "Elige el canal de texto donde los jugadores verán los anuncios.",
     "discordListError": "No se pudieron cargar los canales — revisa la configuración Discord en admin.",
+    "pickChannelEmptyList": "Discord no devolvió canales de texto (bot fuera del servidor, token incorrecto o guild errónea).",
+    "pickChannelDevTitle": "Entrada manual (next dev)",
+    "pickChannelDevHint": "Pega el ID del canal de texto (modo desarrollador → clic derecho en el canal → Copiar ID) y un nombre corto. El run se crea sin verificar la API; los embeds requieren un bot válido en ese canal.",
+    "pickChannelDevId": "ID del canal (snowflake)",
+    "pickChannelDevName": "Nombre mostrado (ej. anuncios)",
     "whenTitle": "¿Cuándo empezar?",
     "nowTitle": "Ahora mismo",
     "nowDesc": "El bot arrancará lo antes posible (unos segundos).",
@@ -299,8 +321,11 @@
     "oauthBody": "Si el servidor no aparece, usa un comando slash del bot (p. ej. <cmd>/setup channel</cmd>) como administrador de Discord y actualiza la página.",
     "emptyTitle": "Vincula tu servidor de Discord",
     "emptySubtitle": "Sin servidor registrado, plantillas y eventos no pueden apuntar a un canal.",
-    "emptyP1": "El panel lee la <bold>misma base PostgreSQL</bold> que el bot (mismo <mono>DATABASE_URL</mono> en <mono>apps/web/.env</mono> y <mono>apps/bot/.env</mono>). Al unirse el bot, la guild se guarda sola — actualiza la página.",
-    "emptyP2": "Si sigue sin aparecer: reinicia el bot o como <bold>administrador de Discord</bold> ejecuta <mono>/setup channel</mono> una vez y actualiza. Registra los slash: <mono>npm run commands:register -w @kingshot/bot</mono>.",
+    "emptyP1": "El panel lee la <bold>misma base PostgreSQL</bold> que el bot (mismo <mono>DATABASE_URL</mono> en tu hosting). Cuando el bot está en línea y se unió al servidor, la guild se guarda — <bold>actualiza la página</bold>. Si el sitio y el bot usan bases distintas, la lista quedará vacía.",
+    "emptyP2": "Si sigue sin aparecer: reinicia el despliegue del bot o como <bold>administrador de Discord</bold> ejecuta <mono>/setup channel</mono> una vez y actualiza. Los comandos slash deben estar registrados para tu aplicación Discord (según tu despliegue).",
+    "emptyDevTitle": "Ayuda para desarrolladores (solo entorno local)",
+    "emptyDevP1": "Mismo <mono>DATABASE_URL</mono> en <mono>apps/web/.env.local</mono> y <mono>apps/bot/.env.local</mono> (p. ej. Postgres Docker <mono>localhost:5433</mono>). Ejecuta <mono>npm run dev:stack</mono> o <mono>npm run bot:dev</mono> junto al sitio; tras invitar al bot, reinícialo si hace falta.",
+    "emptyDevP2": "Slash instantáneos en una guild de prueba: <mono>DISCORD_DEV_GUILD_ID</mono> y luego <mono>npm run commands:register -w @kingshot/bot</mono>. Ver <mono>docs/DEVELOPPEMENT-LOCAL.md</mono>.",
     "serverOne": "Tu servidor de Discord",
     "serverN": "Servidor {n}",
     "roadmapTitle": "Próximamente",

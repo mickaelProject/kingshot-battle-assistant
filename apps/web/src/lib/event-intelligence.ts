@@ -3,6 +3,8 @@
  * Les clés correspondent à `BattleTemplate.eventProductKey` (ex. swordland, kvk).
  */
 
+import { EVENTS, type EventType } from "@/lib/events/event-registry";
+
 export type EventPhaseDef = {
   key: string;
   label: string;
@@ -103,8 +105,31 @@ export type EventIntelligenceKey = keyof typeof eventTypes;
 export function getEventTypeDefinition(
   key: string | null | undefined,
 ): EventTypeDefinition {
-  if (key && key in eventTypes) {
-    return eventTypes[key as EventIntelligenceKey];
+  const k = key?.trim();
+  if (!k) return eventTypes.swordland;
+  if (k === "mobilization") return eventTypes.mobilization;
+  if (k in eventTypes) return eventTypes[k as EventIntelligenceKey];
+  if (k in EVENTS) {
+    const e = EVENTS[k as EventType];
+    return {
+      key: k,
+      displayName: e.name,
+      icon: e.generationRules.icon,
+      phases: [
+        { key: "p0", label: "Début", order: 0 },
+        { key: "p1", label: "Milieu", order: 1 },
+        { key: "p2", label: "Fin", order: 2 },
+      ],
+      logic: {
+        summary: e.description,
+        resolver: "template_timeline",
+      },
+      structure: {
+        legions: e.hasLegions,
+        sides: e.hasLegions,
+        buildings: e.hasBuildings,
+      },
+    };
   }
   return eventTypes.swordland;
 }

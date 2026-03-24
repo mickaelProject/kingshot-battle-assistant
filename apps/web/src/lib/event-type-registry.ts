@@ -1,153 +1,70 @@
 /**
- * Registre produit des types d’événement — extensible sans schéma Prisma dédié.
- * Seul Swordland a aujourd’hui la génération tactique roster complète.
+ * Presets wizard ↔ actions serveur — alignés sur `lib/events/event-registry.ts`.
+ * L’id Prisma / formulaire reste `swordland_showdown` pour Swordland (compat).
  */
+
+import {
+  EVENT_TYPE_KEYS,
+  EVENTS,
+  eventTypeToServerPresetId,
+  type EventType,
+} from "@/lib/events/event-registry";
 
 export type EventPresetSupport = "full" | "partial" | "coming_soon";
 
 export type EventTypePreset = {
+  /** Id envoyé au serveur (actions roster). */
   id: string;
+  eventType: EventType;
   label: string;
   shortLabel: string;
   icon: string;
-  /** Accent UI (bordure / halo cartes) */
   color: string;
   support: EventPresetSupport;
-  /** Arc tactique backend quand support === full */
   battleArchetype: "SWORDLAND" | "CASTLE_SIEGE" | "FORTRESS" | "PVP";
-  /** Message court sous la carte */
   hint: string;
+  duration: number;
+  timingMode: "real_time" | "async";
 };
 
-export const EVENT_TYPE_PRESETS: EventTypePreset[] = [
-  {
-    id: "swordland_showdown",
-    label: "Swordland Showdown",
-    shortLabel: "Swordland",
-    icon: "🗡",
-    color: "#3b82f6",
-    support: "full",
-    battleArchetype: "SWORDLAND",
-    hint: "ORBAT 2 légions, bâtiments, timeline 7 phases.",
-  },
-  {
-    id: "alliance_mobilization",
-    label: "Alliance Mobilization",
-    shortLabel: "Mobilisation",
-    icon: "📣",
-    color: "#8b5cf6",
-    support: "coming_soon",
-    battleArchetype: "SWORDLAND",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "sanctuary_battles",
-    label: "Sanctuary Battles",
-    shortLabel: "Sanctuary",
-    icon: "⛪",
-    color: "#a78bfa",
-    support: "coming_soon",
-    battleArchetype: "SWORDLAND",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "viking_vengeance",
-    label: "Viking Vengeance",
-    shortLabel: "Viking",
-    icon: "🛶",
-    color: "#0ea5e9",
-    support: "coming_soon",
-    battleArchetype: "PVP",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "cesares_fury",
-    label: "Cesares Fury",
-    shortLabel: "Cesares",
-    icon: "⚔",
-    color: "#dc2626",
-    support: "coming_soon",
-    battleArchetype: "CASTLE_SIEGE",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "pitfall_bear_hunt",
-    label: "Pitfall / Bear Hunt",
-    shortLabel: "Pitfall",
-    icon: "🐻",
-    color: "#b45309",
-    support: "coming_soon",
-    battleArchetype: "PVP",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "alliance_championship",
-    label: "Alliance Championship",
-    shortLabel: "Championship",
-    icon: "🏆",
-    color: "#eab308",
-    support: "coming_soon",
-    battleArchetype: "PVP",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "all_out_kill",
-    label: "All Out (Kill Event)",
-    shortLabel: "All Out",
-    icon: "💀",
-    color: "#f43f5e",
-    support: "coming_soon",
-    battleArchetype: "PVP",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "hero_roulette",
-    label: "Hero Roulette",
-    shortLabel: "Roulette",
-    icon: "🎲",
-    color: "#d946ef",
-    support: "coming_soon",
-    battleArchetype: "PVP",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "kingdom_of_power",
-    label: "Kingdom of Power",
-    shortLabel: "KoP",
-    icon: "👑",
-    color: "#f59e0b",
-    support: "coming_soon",
-    battleArchetype: "CASTLE_SIEGE",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "strongest_governor",
-    label: "Strongest Governor",
-    shortLabel: "SG",
-    icon: "🎖",
-    color: "#14b8a6",
-    support: "coming_soon",
-    battleArchetype: "PVP",
-    hint: "Preset réservé — bientôt.",
-  },
-  {
-    id: "rebel_invasion",
-    label: "Rebel Invasion",
-    shortLabel: "Rebelles",
-    icon: "🔥",
-    color: "#ef4444",
-    support: "coming_soon",
-    battleArchetype: "FORTRESS",
-    hint: "Preset réservé — bientôt.",
-  },
-];
+function shortLabelFromName(name: string): string {
+  const part = name.split("—")[0]?.trim();
+  return part && part.length <= 24 ? part : name.slice(0, 22);
+}
 
-export function getEventPresetById(
-  id: string,
-): EventTypePreset | undefined {
+export const EVENT_TYPE_PRESETS: EventTypePreset[] = EVENT_TYPE_KEYS.map(
+  (key) => {
+    const e = EVENTS[key];
+    const gr = e.generationRules;
+    const hint =
+      e.description.length > 140
+        ? `${e.description.slice(0, 137)}…`
+        : e.description;
+    return {
+      id: eventTypeToServerPresetId(key),
+      eventType: key,
+      label: e.name,
+      shortLabel: shortLabelFromName(e.name),
+      icon: gr.icon,
+      color: gr.color,
+      support: "full",
+      battleArchetype: gr.battleArchetype,
+      hint,
+      duration: e.duration,
+      timingMode: e.type,
+    };
+  },
+);
+
+export function getEventPresetById(id: string): EventTypePreset | undefined {
   return EVENT_TYPE_PRESETS.find((p) => p.id === id);
 }
 
 export function presetAllowsWizardFlow(p: EventTypePreset): boolean {
   return p.support === "full";
+}
+
+export function presetIdToEventType(presetId: string): EventType | null {
+  const p = getEventPresetById(presetId);
+  return p?.eventType ?? null;
 }

@@ -14,7 +14,11 @@ import { TIMELINE_SCOPES } from "@/lib/timeline-scope";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { fetchBattleTemplateForDuplicate } from "@/lib/battle-templates-queries";
-import { assertGuildTextChannelId } from "@/lib/discord-rest";
+import {
+  assertGuildTextChannelId,
+  isDiscordSnowflake,
+} from "@/lib/discord-rest";
+import { isAdminDevUi } from "@/lib/is-admin-dev-ui";
 import { parseEventDurationMinutes } from "@/lib/event-duration";
 
 const PHASES: BattlePhaseType[] = [
@@ -786,10 +790,21 @@ export async function createManagedRunAction(
     };
   }
 
-  const chCheck = await assertGuildTextChannelId(
+  let chCheck = await assertGuildTextChannelId(
     guild.discordGuildId,
     channelId,
   );
+  if (
+    !chCheck.ok &&
+    isAdminDevUi() &&
+    isDiscordSnowflake(channelId)
+  ) {
+    console.warn(
+      "[kingshot:web] Salon accepté sans vérification API Discord (next dev).",
+      { channelId, previousError: chCheck.error },
+    );
+    chCheck = { ok: true };
+  }
   if (!chCheck.ok) return { ok: false, error: chCheck.error };
 
   let scheduledAt: Date;

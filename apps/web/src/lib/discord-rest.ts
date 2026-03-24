@@ -1,4 +1,13 @@
+import { isAdminDevUi } from "./is-admin-dev-ui";
+
 const DISCORD_API = "https://discord.com/api/v10";
+
+/** ID salon / guilde Discord (snowflake). */
+export const DISCORD_SNOWFLAKE_RE = /^\d{17,22}$/;
+
+export function isDiscordSnowflake(id: string): boolean {
+  return DISCORD_SNOWFLAKE_RE.test(id.trim());
+}
 
 /** Discord API: GUILD_TEXT = 0, GUILD_ANNOUNCEMENT = 5 */
 const TEXT_CHANNEL_TYPES = new Set([0, 5]);
@@ -77,10 +86,13 @@ export async function assertGuildTextChannelId(
   channelId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!hasDiscordBotToken()) {
+    const base =
+      "DISCORD_BOT_TOKEN n'est pas configuré : impossible de valider le salon. Utilisez la même valeur que le token du bot Discord.";
     return {
       ok: false,
-      error:
-        "DISCORD_BOT_TOKEN est absent dans apps/web/.env : impossible de valider le salon. Ajoute le même token que le bot.",
+      error: isAdminDevUi()
+        ? `${base} En local : apps/web/.env ou .env.local.`
+        : base,
     };
   }
 

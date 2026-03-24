@@ -79,6 +79,15 @@ function looksLikeStartingStatusError(e: unknown): boolean {
   return false;
 }
 
+function isPrismaUnavailableError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (e instanceof Prisma.PrismaClientInitializationError) return true;
+  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P1001") {
+    return true;
+  }
+  return /can't reach database|database server|connect/i.test(msg);
+}
+
 async function findOverviewRunWithStatuses(
   selectFlags: { channelNameSnapshot: boolean; templateEventDuration: boolean },
   statuses: ManagedEventStatus[],
@@ -118,6 +127,7 @@ export async function fetchOverviewActiveRun(): Promise<OverviewActiveRun | null
       ]);
       base = r.row;
     } catch (e) {
+      if (isPrismaUnavailableError(e)) return null;
       if (looksLikeStartingStatusError(e)) {
         try {
           const r = await findOverviewRunWithStatuses(flags, [
@@ -125,6 +135,7 @@ export async function fetchOverviewActiveRun(): Promise<OverviewActiveRun | null
           ]);
           base = r.row;
         } catch (e2) {
+          if (isPrismaUnavailableError(e2)) return null;
           if (!(e2 instanceof Prisma.PrismaClientKnownRequestError)) throw e2;
           const blob = p2022Blob(e2);
           if (e2.code === "P2022") {
@@ -158,15 +169,20 @@ export async function fetchOverviewActiveRun(): Promise<OverviewActiveRun | null
       _count: { events: number };
     };
 
-    const reminders =
-      base.session != null
-        ? await prisma.battleReminder.findMany({
-            where: { sessionId: base.session.id },
-            orderBy: { scheduledAt: "asc" },
-            take: 200,
-            select: reminderSelect,
-          })
-        : [];
+    let reminders: OverviewReminder[] = [];
+    if (base.session != null) {
+      try {
+        reminders = await prisma.battleReminder.findMany({
+          where: { sessionId: base.session.id },
+          orderBy: { scheduledAt: "asc" },
+          take: 200,
+          select: reminderSelect,
+        });
+      } catch (e) {
+        if (isPrismaUnavailableError(e)) return null;
+        throw e;
+      }
+    }
 
     const eventDurationMinutes = tpl.eventDurationMinutes ?? 60;
 

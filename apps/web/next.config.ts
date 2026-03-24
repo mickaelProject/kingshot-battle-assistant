@@ -1,10 +1,20 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin();
 
+/** Racine du monorepo (évite l’avertissement multi lockfile / tracing). */
+const monorepoRoot = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+);
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  outputFileTracingRoot: monorepoRoot,
   async redirects() {
     return [
       {

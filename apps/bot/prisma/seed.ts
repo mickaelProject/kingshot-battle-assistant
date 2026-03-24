@@ -1,4 +1,7 @@
-import "dotenv/config";
+import { loadBotEnv } from "../src/config/load-dotenv.js";
+
+loadBotEnv();
+
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();

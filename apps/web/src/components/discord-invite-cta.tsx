@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
@@ -18,6 +19,13 @@ export function DiscordInviteCta({
 }) {
   const t = useTranslations("discordInvite");
   const willRedirectBack = Boolean(inviteUrl && installRedirectUri);
+  const showDevHints = process.env.NODE_ENV === "development";
+  const richInline = {
+    mono: (chunks: ReactNode) => (
+      <code className="discord-invite-cta__mono">{chunks}</code>
+    ),
+    strong: (chunks: ReactNode) => <strong>{chunks}</strong>,
+  };
 
   return (
     <div className={`discord-invite-cta ${className}`.trim()}>
@@ -31,7 +39,10 @@ export function DiscordInviteCta({
           {t("inviteBtn")}
         </a>
       ) : (
-        <p className="form-error discord-invite-cta__missing">{t("missingEnv")}</p>
+        <p className="form-error discord-invite-cta__missing">
+          {t.rich("missingEnv", richInline)}
+          {showDevHints ? <> {t.rich("missingEnvDev", richInline)}</> : null}
+        </p>
       )}
       {inviteUrl ? (
         <p className="field-hint discord-invite-cta__redirect-note">
@@ -41,7 +52,11 @@ export function DiscordInviteCta({
           {willRedirectBack ? (
             <> {t("oauthExtra")}</>
           ) : (
-            <> {t("redirectSetup")}</>
+            <>
+              {" "}
+              {t.rich("redirectSetup", richInline)}
+              {showDevHints ? <> {t.rich("redirectSetupDev", richInline)}</> : null}
+            </>
           )}
         </p>
       ) : null}

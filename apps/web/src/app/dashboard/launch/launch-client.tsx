@@ -6,6 +6,7 @@ import {
   createManagedRunAction,
   type ManagedRunActionResult,
 } from "@/actions/data";
+import { isDiscordSnowflake } from "@/lib/discord-rest";
 import { DiscordInviteCta } from "@/components/discord-invite-cta";
 import { SectionCard } from "@/components/ui/section-card";
 
@@ -24,6 +25,7 @@ export function LaunchClient({
   discordConfigured,
   discordInviteUrl,
   discordInstallRedirectUri,
+  devManualChannelEntry = false,
 }: {
   guilds: Guild[];
   templates: Template[];
@@ -31,6 +33,7 @@ export function LaunchClient({
   discordConfigured: boolean;
   discordInviteUrl: string | null;
   discordInstallRedirectUri: string | null;
+  devManualChannelEntry?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -114,11 +117,17 @@ export function LaunchClient({
     setChannelNameSnapshot(ch?.name ?? "");
   }
 
-  const channelChoiceInvalid =
-    !discordConfigured ||
-    channels.length === 0 ||
-    !channelId ||
-    !channels.some((c) => c.id === channelId);
+  const listPickOk =
+    discordConfigured &&
+    channels.length > 0 &&
+    Boolean(channelId) &&
+    channels.some((c) => c.id === channelId);
+  const manualDevOk =
+    devManualChannelEntry &&
+    isDiscordSnowflake(channelId) &&
+    channelNameSnapshot.trim().length >= 1 &&
+    (!discordConfigured || channels.length === 0);
+  const channelChoiceInvalid = !listPickOk && !manualDevOk;
 
   const step1Ok = Boolean(guildId);
   const step2Ok = filteredTemplates.length > 0;
@@ -150,12 +159,24 @@ export function LaunchClient({
 
       {!discordConfigured ? (
         <p className="err">
-          <code>DISCORD_BOT_TOKEN</code> requis dans <code>apps/web/.env</code>{" "}
-          pour lister les salons.
+          {process.env.NODE_ENV === "development" ? (
+            <>
+              <code>DISCORD_BOT_TOKEN</code> requis dans{" "}
+              <code>apps/web/.env</code> ou <code>.env.local</code> pour lister
+              les salons.
+            </>
+          ) : (
+            <>
+              Variable <code>DISCORD_BOT_TOKEN</code> requise (même valeur que le
+              token du bot) pour lister les salons.
+            </>
+          )}
         </p>
       ) : null}
 
-      {discordConfigured && channels.length === 0 ? (
+      {discordConfigured &&
+      channels.length === 0 &&
+      !devManualChannelEntry ? (
         <p className="err">
           Aucun salon texte listé pour ce serveur — vérifie l’invitation du bot.
         </p>
@@ -205,28 +226,58 @@ export function LaunchClient({
           <label htmlFor="channelSelect">
             <span className="launch-field__step">3</span> Salon où poster les embeds
           </label>
-          <select
-            id="channelSelect"
-            name="channelId"
-            value={channelId}
-            onChange={(e) => onChannelChange(e.target.value)}
-            required
-            disabled={!discordConfigured || channels.length === 0}
-          >
-            {channels.length === 0 ? (
-              <option value="">—</option>
-            ) : (
-              channels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  #{c.name}
-                </option>
-              ))
-            )}
-          </select>
-          <p className="muted launch-hint">
-            Prérempli avec le salon de bataille par défaut de la guilde lorsqu’il
-            est valide.
-          </p>
+          {devManualChannelEntry &&
+          (!discordConfigured || channels.length === 0) ? (
+            <>
+              <p className="muted launch-hint" style={{ marginBottom: "0.5rem" }}>
+                <strong>Mode dev</strong> : saisie manuelle si la liste Discord est
+                vide — ID du salon (snowflake) + nom affiché.
+              </p>
+              <input
+                id="channelSelect"
+                className="dev-guild-shortcut__input"
+                style={{ width: "100%", marginBottom: "0.5rem" }}
+                value={channelId}
+                onChange={(e) => setChannelId(e.target.value)}
+                placeholder="ID salon Discord"
+                autoComplete="off"
+                inputMode="numeric"
+              />
+              <input
+                className="dev-guild-shortcut__input"
+                style={{ width: "100%" }}
+                value={channelNameSnapshot}
+                onChange={(e) => setChannelNameSnapshot(e.target.value)}
+                placeholder="Nom (ex. annonces)"
+                autoComplete="off"
+              />
+            </>
+          ) : (
+            <>
+              <select
+                id="channelSelect"
+                name="channelId"
+                value={channelId}
+                onChange={(e) => onChannelChange(e.target.value)}
+                required
+                disabled={!discordConfigured || channels.length === 0}
+              >
+                {channels.length === 0 ? (
+                  <option value="">—</option>
+                ) : (
+                  channels.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      #{c.name}
+                    </option>
+                  ))
+                )}
+              </select>
+              <p className="muted launch-hint">
+                Prérempli avec le salon de bataille par défaut de la guilde lorsqu’il
+                est valide.
+              </p>
+            </>
+          )}
         </div>
 
         <div className="launch-field">

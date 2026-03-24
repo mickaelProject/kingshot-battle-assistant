@@ -1,43 +1,39 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { LiveWarScreen } from "@/components/live-war-screen";
-import { fetchLiveBattlePayload } from "@/lib/live-battle-view";
+import { ClientLiveJoinForm } from "@/components/client-live-join-form";
+import { fetchOverviewActiveRun } from "@/lib/overview-active-run";
 
 export const dynamic = "force-dynamic";
 
-export default async function AppLivePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ run?: string; me?: string }>;
-}) {
-  const sp = await searchParams;
-  const runId = sp.run?.trim();
-  if (!runId) {
-    return (
-      <main className="live-war live-war--landing">
-        <h1 className="live-war__title">Lien incomplet</h1>
-        <p className="muted">
-          Ajoutez <code className="roster-code-hint">?run=…</code> (identifiant
-          de mission fourni par les officiers).
-        </p>
-        <p>
-          <Link href="/app" className="text-link">
-            Retour
-          </Link>
-        </p>
-      </main>
-    );
-  }
-
-  const payload = await fetchLiveBattlePayload(runId, sp.me?.trim() ?? null);
-  if (!payload) notFound();
+export default async function AppLivePage() {
+  const activeRun = await fetchOverviewActiveRun();
 
   return (
-    <main className="live-war-page">
-      <LiveWarScreen initial={payload} />
+    <main className="client-page client-live-page">
+      <section className="client-panel">
+        <h1>Rejoindre un live</h1>
+        <p className="muted">
+          Utilisez un identifiant de run, ou rejoignez directement l&apos;event
+          actif de l&apos;alliance.
+        </p>
+
+        <ClientLiveJoinForm />
+
+        <div className="client-live-actions">
+          {activeRun ? (
+            <Link href={`/live/${activeRun.id}`} className="public-btn public-btn--ghost">
+              Rejoindre le live actuel
+            </Link>
+          ) : (
+            <p className="muted">Aucun live actif pour le moment.</p>
+          )}
+          <Link href="/app" className="public-btn">
+            Retour a l&apos;espace client
+          </Link>
+        </div>
+      </section>
       <footer className="live-war-foot muted">
-        <Link href="/app" className="text-link">
-          Accueil joueur
+        <Link href="/app/live" className="text-link">
+          Astuce: URL directe /live/{`{runId}`}
         </Link>
       </footer>
     </main>

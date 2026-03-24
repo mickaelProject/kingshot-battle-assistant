@@ -2,28 +2,44 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { config as loadEnvFile } from "dotenv";
 import { PrismaClient } from "@prisma/client";
+import { isAdminDevUi } from "./is-admin-dev-ui";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(__dirname, "../..");
 const repoRoot = path.resolve(__dirname, "../../../..");
 
+/**
+ * Ordre de chargement :
+ * 1) `.env` partagés (Railway / prod / valeurs par défaut)
+ * 2) `.env.local` (non commité) avec `override` — **priorité dev local**
+ *
+ * Ainsi tu peux garder une URL cloud dans `apps/web/.env` et surcharger avec
+ * PostgreSQL local dans `apps/web/.env.local` sans rien retirer du dépôt.
+ */
 function ensureDatabaseUrl(): void {
-  if (process.env.DATABASE_URL?.trim()) return;
-
-  // Next ne lit que apps/web/.env — beaucoup de configs n’ont que apps/bot/.env
+  loadEnvFile({ path: path.join(webRoot, ".env") });
   loadEnvFile({ path: path.join(repoRoot, "apps/bot/.env") });
   loadEnvFile({ path: path.join(repoRoot, ".env") });
-  loadEnvFile({ path: path.join(webRoot, ".env.local") });
-  loadEnvFile({ path: path.join(webRoot, ".env") });
+  loadEnvFile({
+    path: path.join(repoRoot, "apps/bot/.env.local"),
+    override: true,
+  });
+  loadEnvFile({
+    path: path.join(webRoot, ".env.local"),
+    override: true,
+  });
 }
 
 ensureDatabaseUrl();
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl) {
+  const devHint = isAdminDevUi()
+    ? " En développement : créez apps/web/.env.local (npm run setup:local) ou renseignez apps/web/.env."
+    : "";
   throw new Error(
-    "[kingshot:web] DATABASE_URL est absent. Copie la même URL que le bot dans apps/web/.env " +
-      "(voir .env.example), ou assure-toi que apps/bot/.env contient DATABASE_URL pour le fallback.",
+    "[kingshot:web] DATABASE_URL est obligatoire et doit être identique à celle du bot." +
+      devHint,
   );
 }
 

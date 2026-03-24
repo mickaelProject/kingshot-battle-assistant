@@ -172,10 +172,14 @@ export const SWORDLAND_BUILDINGS: BuildingDef[] = [
   { id: "sword", name: "Swordshrines", side: "EAST" },
 ];
 
+export type BuildingStance = "ATTAQUE" | "DEFENSE";
+
 export type BuildingAssignment = {
   id: string;
   name: string;
   side: "WEST" | "EAST";
+  /** Rôle tactique indicatif pour l’UI (alternance par bâtiment sur chaque côté). */
+  stance: BuildingStance;
   leader: RosterPlayer | null;
   players: RosterPlayer[];
 };
@@ -195,10 +199,12 @@ function assignBuildingsForSide(
       leaders[i % Math.max(1, leaders.length)] ??
       followers[0] ??
       null;
+    const stance: BuildingStance = i % 2 === 0 ? "ATTAQUE" : "DEFENSE";
     return {
       id: b.id,
       name: b.name,
       side: b.side,
+      stance,
       leader: lead,
       players: chunks[i] ?? [],
     };

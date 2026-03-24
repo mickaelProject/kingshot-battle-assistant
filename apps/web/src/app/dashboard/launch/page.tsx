@@ -1,3 +1,4 @@
+import { isAdminDevUi } from "@/lib/is-admin-dev-ui";
 import { prisma } from "@/lib/prisma";
 import {
   getDiscordBotInviteUrl,
@@ -43,6 +44,7 @@ export default async function LaunchPage() {
       discordConfigured={hasDiscordBotToken()}
       discordInviteUrl={discordInviteUrl}
       discordInstallRedirectUri={discordInstallRedirectUri}
+      devManualChannelEntry={isAdminDevUi()}
     />
   );
 }

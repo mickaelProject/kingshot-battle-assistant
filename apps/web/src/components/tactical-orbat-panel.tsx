@@ -114,7 +114,14 @@ export function TacticalOrbatPanel({ plan }: { plan: TacticalWarPlan }) {
               <ul className="tactical-orbat__building-grid" role="list">
                 {L.buildings.map((b) => (
                   <li key={b.id} className="tactical-orbat__building-card">
-                    <div className="tactical-orbat__building-name">{b.name}</div>
+                    <div className="tactical-orbat__building-name-row">
+                      <div className="tactical-orbat__building-name">{b.name}</div>
+                      <span
+                        className={`tactical-orbat__building-stance tactical-orbat__building-stance--${b.stance === "ATTAQUE" ? "atk" : "def"}`}
+                      >
+                        {b.stance === "ATTAQUE" ? "Attaque" : "Défense"}
+                      </span>
+                    </div>
                     <div className="tactical-orbat__building-side muted">
                       {b.side}
                     </div>

@@ -36,57 +36,101 @@ export default async function OverviewPage() {
   const ta = await getTranslations("activity");
   const locale = await getLocale();
   const botOk = hasDiscordBotToken();
+  type OverviewLoadData = {
+    guilds: {
+      id: string;
+      discordGuildId: string;
+      battleChannelId: string | null;
+      defaultTemplate: { name: string; id: string } | null;
+    }[];
+    nextRun: {
+      id: string;
+      scheduledAt: Date;
+      template: { name: string };
+      guild: { discordGuildId: string };
+    } | null;
+    activeRun: Awaited<ReturnType<typeof fetchOverviewActiveRun>>;
+    rawActivity: {
+      id: string;
+      level: string;
+      message: string;
+      createdAt: Date;
+      runId: string;
+      run: { id: string; template: { name: string } | null };
+    }[];
+    templateCount: number;
+    scheduledRunCount: number;
+    totalRunCount: number;
+    liveRunCount: number;
+    channelOptionsByGuild: Map<string, { id: string; name: string }[]>;
+  };
+  let data: OverviewLoadData | null = null;
 
-  const guildsPromise = prisma.guildSettings.findMany({
-    orderBy: { discordGuildId: "asc" },
-    include: {
-      defaultTemplate: { select: { name: true, id: true } },
-    },
-  });
-  const bundlePromise = Promise.all([
-    prisma.managedEventRun.findFirst({
-      where: { status: "SCHEDULED" },
-      orderBy: { scheduledAt: "asc" },
-      /* select explicite : évite de lire les colonnes légion du run (P2022 si client/base désalignés). */
-      select: {
-        id: true,
-        scheduledAt: true,
-        template: { select: { name: true } },
-        guild: { select: { discordGuildId: true } },
+  try {
+    const guilds = await prisma.guildSettings.findMany({
+      orderBy: { discordGuildId: "asc" },
+      include: {
+        defaultTemplate: { select: { name: true, id: true } },
       },
-    }),
-    fetchOverviewActiveRun(),
-    prisma.managedEventRunLog.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 14,
-      select: {
-        id: true,
-        level: true,
-        message: true,
-        createdAt: true,
-        runId: true,
-        run: {
+    });
+    const channelsPromise =
+      botOk && guilds.length > 0
+        ? fetchGuildTextChannelOptionsByGuildId(guilds)
+        : Promise.resolve(new Map<string, { id: string; name: string }[]>());
+    const [
+      [
+        nextRun,
+        activeRun,
+        rawActivity,
+        templateCount,
+        scheduledRunCount,
+        totalRunCount,
+        liveRunCount,
+      ],
+      channelOptionsByGuild,
+    ] = await Promise.all([
+      Promise.all([
+        prisma.managedEventRun.findFirst({
+          where: { status: "SCHEDULED" },
+          orderBy: { scheduledAt: "asc" },
+          /* select explicite : évite de lire les colonnes légion du run (P2022 si client/base désalignés). */
           select: {
             id: true,
+            scheduledAt: true,
             template: { select: { name: true } },
+            guild: { select: { discordGuildId: true } },
           },
-        },
-      },
-    }),
-    prisma.battleTemplate.count(),
-    prisma.managedEventRun.count({ where: { status: "SCHEDULED" } }),
-    prisma.managedEventRun.count(),
-    prisma.managedEventRun.count({
-      where: { status: { in: ["STARTING", "ACTIVE"] } },
-    }),
-  ]);
-  const guilds = await guildsPromise;
-  const channelsPromise =
-    botOk && guilds.length > 0
-      ? fetchGuildTextChannelOptionsByGuildId(guilds)
-      : Promise.resolve(new Map<string, { id: string; name: string }[]>());
-  const [
-    [
+        }),
+        fetchOverviewActiveRun(),
+        prisma.managedEventRunLog.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 14,
+          select: {
+            id: true,
+            level: true,
+            message: true,
+            createdAt: true,
+            runId: true,
+            run: {
+              select: {
+                id: true,
+                template: { select: { name: true } },
+              },
+            },
+          },
+        }),
+        prisma.battleTemplate.count(),
+        prisma.managedEventRun.count({ where: { status: "SCHEDULED" } }),
+        prisma.managedEventRun.count(),
+        prisma.managedEventRun.count({
+          where: { status: { in: ["STARTING", "ACTIVE"] } },
+        }),
+      ]),
+      channelsPromise,
+    ]);
+
+    data = {
+      guilds,
       nextRun,
       activeRun,
       rawActivity,
@@ -94,9 +138,41 @@ export default async function OverviewPage() {
       scheduledRunCount,
       totalRunCount,
       liveRunCount,
-    ],
+      channelOptionsByGuild,
+    };
+  } catch (error) {
+    console.error("[dashboard] overview data load failed", error);
+    return (
+      <div className="dashboard-main dashboard-home max-w-[1200px]">
+        <SectionCard
+          title="Dashboard temporairement indisponible"
+          subtitle="Connexion base de donnees impossible"
+        >
+          <p className="muted">
+            Impossible de charger les donnees admin pour le moment. Verifie la
+            connexion PostgreSQL puis recharge la page.
+          </p>
+          <p className="mt-3">
+            <Link href="/dashboard/server" className="text-link">
+              Ouvrir les parametres serveur
+            </Link>
+          </p>
+        </SectionCard>
+      </div>
+    );
+  }
+
+  const {
+    guilds,
+    nextRun,
+    activeRun,
+    rawActivity,
+    templateCount,
+    scheduledRunCount,
+    totalRunCount,
+    liveRunCount,
     channelOptionsByGuild,
-  ] = await Promise.all([bundlePromise, channelsPromise]);
+  } = data;
 
   const activityItems: OverviewActivityItem[] = rawActivity.map((log) => ({
     id: log.id,

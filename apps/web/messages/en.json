@@ -20,18 +20,18 @@
     "groupOps": "Operations",
     "groupNetwork": "Network",
     "brandSubtitle": "BATTLE ASSISTANT",
-    "botConnected": "Bot connected",
-    "botDisconnected": "Bot not configured"
+    "botConnected": "Web token set",
+    "botDisconnected": "Web token missing"
   },
   "common": {
     "live": "LIVE"
   },
   "topbar": {
     "hint": "Command center",
-    "botOkTitle": "Bot token present — the worker can control Discord.",
-    "botWarnTitle": "Bot token missing — set DISCORD_BOT_TOKEN.",
-    "botOk": "Bot ready",
-    "botWarn": "Bot offline",
+    "botOkTitle": "DISCORD_BOT_TOKEN is set for this site (Discord API from the admin). It does not mean the bot process is running or that a guild row exists yet.",
+    "botWarnTitle": "DISCORD_BOT_TOKEN missing — channel lists will not work.",
+    "botOk": "Web token OK",
+    "botWarn": "No web token",
     "launchEvent": "Launch an event",
     "logout": "Log out"
   },
@@ -50,7 +50,7 @@
     "noServers": "No server linked",
     "allChannelsReady": "All tactical channels are set",
     "someChannelsReady": "{ready} / {total} channels configured",
-    "tokenMissing": " · bot token missing",
+    "tokenMissing": " · DISCORD_BOT_TOKEN missing",
     "fieldStateTitle": "Field status",
     "serverSettingsLink": "Server settings",
     "activityTitle": "Activity feed",
@@ -93,8 +93,8 @@
     "statBot": "DISCORD BOT",
     "statBotOk": "OK",
     "statBotErr": "ERR",
-    "workerReady": "Worker ready",
-    "checkConnection": "Check connection"
+    "workerReady": "Web token for API",
+    "checkConnection": "Web token missing"
   },
   "sitrep": {
     "aria": "Situation report",
@@ -130,6 +130,21 @@
     "emptyTitle": "No templates",
     "emptyBody": "Create a template or initialize from the bot.",
     "emptyNoGuild": "No server in database: start by inviting the bot (see below).",
+    "devGuild": {
+      "title": "Local shortcut (next dev)",
+      "body": "“Web token OK” only means DISCORD_BOT_TOKEN is set here — not that the bot process wrote to the database. To unblock templates without waiting for the bot, register your Discord server ID:",
+      "prefillNote": "Prefilled from DEV_DISCORD_GUILD_ID in .env.local.",
+      "label": "Discord server ID (snowflake)",
+      "placeholder": "e.g. 123456789012345678",
+      "submit": "Save to database",
+      "saving": "Saving…",
+      "success": "Guild saved. The page refreshes — you can create a template or open Server to pick a channel.",
+      "errors": {
+        "not_dev": "Disabled outside development mode.",
+        "invalid_id": "Invalid ID: 17–22 digits. Enable Discord Developer Mode → right‑click server icon → Copy Server ID.",
+        "db_error": "PostgreSQL error — check DATABASE_URL and npm run db:migrate:local."
+      }
+    },
     "create": "Create template",
     "fromRosterShort": "From roster",
     "badgeDefault": "Default",
@@ -150,10 +165,12 @@
   },
   "discordInvite": {
     "inviteBtn": "Invite the bot to my Discord server",
-    "missingEnv": "Environment variable DISCORD_CLIENT_ID is missing (in apps/web/.env). Use the same value as on the bot (Discord application → Application ID).",
+    "missingEnv": "Environment variable <mono>DISCORD_CLIENT_ID</mono> is missing. Add your Discord <strong>Application ID</strong> (same as configured for the bot) to the site’s environment variables.",
+    "missingEnvDev": "In development: <mono>apps/web/.env</mono> or <mono>.env.local</mono>.",
     "openTabHint": "The link opens in a <strong>new tab</strong> to keep the dashboard here. After “Authorize”, if Discord shows “Success”, close that tab and return here.",
     "oauthExtra": "If OAuth redirect is configured, Discord may also open your dashboard in the new tab.",
-    "redirectSetup": "For automatic redirect in the new tab, set DISCORD_INSTALL_REDIRECT_URL or NEXT_PUBLIC_APP_URL in apps/web/.env and the same URL in Discord portal → OAuth2 → Redirects.",
+    "redirectSetup": "For automatic redirect after authorization, set <mono>DISCORD_INSTALL_REDIRECT_URL</mono> or <mono>NEXT_PUBLIC_APP_URL</mono> to your dashboard’s public URL, and register the <strong>exact same</strong> URL under Discord → OAuth2 → Redirects.",
+    "redirectSetupDev": "Local example: <mono>http://localhost:3000/dashboard/server</mono> (add it under Redirects).",
     "portalHint": "Discord portal → OAuth2 → <strong>Redirects</strong>: add exactly",
     "step1": "In the new tab, pick your server and approve permissions.",
     "step2": "On Discord, as <strong>administrator</strong>, run a bot slash command once (e.g. /setup channel) to register your guild.",
@@ -181,6 +198,11 @@
     "pickChannelTitle": "Where to post on Discord?",
     "pickChannelHint": "Pick the text channel where players will see announcements.",
     "discordListError": "Could not load channels — check Discord configuration in admin.",
+    "pickChannelEmptyList": "Discord returned no text channels (bot not on server, wrong token, or wrong guild).",
+    "pickChannelDevTitle": "Manual entry (next dev)",
+    "pickChannelDevHint": "Paste the text channel ID (Developer Mode → right‑click channel → Copy Channel ID) and a short label. The run is created without API verification; Discord posts still need a working bot on that channel.",
+    "pickChannelDevId": "Channel ID (snowflake)",
+    "pickChannelDevName": "Display name (e.g. announcements)",
     "whenTitle": "When to start?",
     "nowTitle": "Right now",
     "nowDesc": "The bot will start as soon as possible (a few seconds).",
@@ -299,8 +321,11 @@
     "oauthBody": "If your server still doesn’t appear, run a bot slash command (e.g. <cmd>/setup channel</cmd>) as a Discord administrator, then refresh this page.",
     "emptyTitle": "Link your Discord server",
     "emptySubtitle": "Without a registered server, templates and events cannot target a channel.",
-    "emptyP1": "The dashboard reads the <bold>same PostgreSQL database</bold> as the bot (same <mono>DATABASE_URL</mono> in <mono>apps/web/.env</mono> and <mono>apps/bot/.env</mono>). When the bot joins a server (up-to-date code), the guild is saved automatically — refresh this page.",
-    "emptyP2": "If the server still doesn’t show: restart the bot process, or as <bold>Discord administrator</bold> run <mono>/setup channel</mono> (announcement channel) once, then refresh. Also ensure slash commands are registered: <mono>npm run commands:register -w @kingshot/bot</mono>.",
+    "emptyP1": "The dashboard reads the <bold>same PostgreSQL database</bold> as the bot (same <mono>DATABASE_URL</mono> in your hosting). When the bot is online and has joined your server, the guild is saved — <bold>refresh this page</bold>. If the site and bot use different databases, the list stays empty.",
+    "emptyP2": "If the server still doesn’t show: restart your bot deployment, or as <bold>Discord administrator</bold> run <mono>/setup channel</mono> (announcement channel) once, then refresh. Slash commands must be registered for your Discord application (per your deployment process).",
+    "emptyDevTitle": "Developer hints (local mode only)",
+    "emptyDevP1": "Use the same <mono>DATABASE_URL</mono> in <mono>apps/web/.env.local</mono> and <mono>apps/bot/.env.local</mono> (e.g. Docker Postgres <mono>localhost:5433</mono>). Run <mono>npm run dev:stack</mono> or <mono>npm run bot:dev</mono> alongside the site, then re-invite or restart the bot after adding it to Discord.",
+    "emptyDevP2": "Instant slash commands on a test guild: set <mono>DISCORD_DEV_GUILD_ID</mono> then <mono>npm run commands:register -w @kingshot/bot</mono>. See <mono>docs/DEVELOPPEMENT-LOCAL.md</mono>.",
     "serverOne": "Your Discord server",
     "serverN": "Server {n}",
     "roadmapTitle": "Coming soon",

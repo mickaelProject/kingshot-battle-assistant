@@ -1,4 +1,7 @@
-import "dotenv/config";
+import { loadBotEnv } from "../src/config/load-dotenv.js";
+
+loadBotEnv();
+
 import { REST, Routes } from "discord.js";
 import { commandBodies } from "../src/discord/command-definitions.js";
 import { discordEnv } from "../src/config/discord-env.js";

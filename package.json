@@ -14,13 +14,21 @@
     "web:build": "npm run build -w @kingshot/web",
     "db:generate": "npm run db:generate -w @kingshot/bot",
     "db:migrate": "npm run db:migrate -w @kingshot/bot",
+    "db:migrate:local": "npm run db:migrate:local -w @kingshot/bot",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
     "db:migrate:deploy": "npm run db:migrate:deploy -w @kingshot/bot",
     "db:seed": "npm run db:seed -w @kingshot/bot",
     "bot:dev": "npm run dev -w @kingshot/bot",
+    "dev:stack": "concurrently -n web,bot -c cyan,magenta \"npm run web:dev\" \"npm run bot:dev\"",
+    "setup:local": "node scripts/copy-local-env-examples.mjs",
     "test": "npm run test -w @kingshot/bot",
     "lint": "npm run lint -w @kingshot/bot --if-present"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }
